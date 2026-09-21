@@ -174,6 +174,11 @@ from pathlib import Path
 results_path, output_path = map(Path, sys.argv[1:])
 rows = list(csv.DictReader(results_path.open()))
 baselines = {(r['benchmark'], r['seed']): r for r in rows if r['variant'] == 'baseline'}
+if not baselines:
+    # Physical async comparisons use async_off/async_on instead of a generic
+    # baseline; the first listed variant is the explicit reference there.
+    for row in rows:
+        baselines.setdefault((row['benchmark'], row['seed']), row)
 fields = list(rows[0]) + ['wall_speedup', 'rollout_speedup', 'ppo_speedup'] if rows else []
 with output_path.open('w', newline='') as handle:
     writer = csv.DictWriter(handle, fieldnames=fields)
