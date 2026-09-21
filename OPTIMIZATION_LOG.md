@@ -48,3 +48,12 @@
 - Verification: the environment test checks cache reuse and no aliasing.
 - Scope: dynamic `wire`, `df`, `hier`, and `pos` masks remain placement-dependent
   and are not cached.
+
+## Phase 4: batched worker stepping foundation
+
+- Change: Ray workers now expose `step_many(actions)`, executing a contiguous
+  action chunk locally and returning one result list. It stops at episode end.
+- This is the transport primitive for worker-side rollout aggregation and is
+  useful for evaluation/precomputed action sequences without changing step
+  semantics. Training still uses policy-dependent single steps until model
+  synchronization is introduced and validated.

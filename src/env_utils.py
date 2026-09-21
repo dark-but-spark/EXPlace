@@ -301,6 +301,20 @@ def init_ray_envs(args, num_envs, problem):
             return self.env.reset(reward_scaling_flag, corner_flag, visualize_flag)
         def step(self, action):
             return self.env.step(action)
+        def step_many(self, actions):
+            """Execute a contiguous action chunk in the worker.
+
+            This reduces Ray calls for deterministic action sequences while
+            preserving the environment's exact step semantics. The driver can
+            use this for evaluation or precomputed rollouts.
+            """
+            results = []
+            for action in actions:
+                result = self.env.step(action)
+                results.append(result)
+                if result[2]:
+                    break
+            return results
         def set_reward_weights(self, weights):
             return self.env.set_reward_weights(weights)
         def visualize_placement(self, i_episode):
