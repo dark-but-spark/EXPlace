@@ -84,9 +84,11 @@ def process_args():
     config_dict.setdefault('reward_weight_mode', 'fixed')
     config_dict.setdefault('reward_granularity', 'step')
     config_dict.setdefault('evaluation_interval', 100)
-    config_dict.setdefault('evaluate_best_reward_with_dmp', True)
-    config_dict.setdefault('visualization_interval', 1)
-    config_dict.setdefault('visualize_prototype', True)
+    # Performance-oriented defaults: expensive artifacts are opt-in. Existing
+    # configs that explicitly set these keys retain their historical behavior.
+    config_dict.setdefault('evaluate_best_reward_with_dmp', False)
+    config_dict.setdefault('visualization_interval', 0)
+    config_dict.setdefault('visualize_prototype', False)
     if not config_dict.get('used_masks') or config_dict['used_masks'][-1] != 'pos':
         raise ValueError("used_masks must end with the hard position mask 'pos'")
     if len(config_dict.get('trade_off_coeff', [])) != len(config_dict['used_masks']) - 1:
