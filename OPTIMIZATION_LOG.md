@@ -65,6 +65,9 @@
   enables AMP.
 - Gate: numerical comparison and GPU throughput measurement are required before
   enabling this in production configs; no speedup claim is made on this host.
+- Verification: a CPU BF16 local-CNN comparison test has max absolute error
+  below `1e-2`. This does not substitute for the full actor/GPU FP16/BF16 gate;
+  `mixed_precision` remains explicitly false in `compare_quick`.
 
 ## Phase 6: vectorized occupancy updates
 

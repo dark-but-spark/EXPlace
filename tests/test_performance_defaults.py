@@ -17,6 +17,7 @@ class PerformanceDefaultsTest(unittest.TestCase):
         self.assertEqual(config["visualization_interval"], 0)
         self.assertTrue(config.get("compact_transition", True))
         self.assertTrue(config["worker_rollout"])
+        self.assertFalse(config["mixed_precision"])
 
 
 if __name__ == "__main__":
