@@ -105,6 +105,11 @@
   buffer path.
 - Verification: snapshot reconstruction is element-wise equivalent in the
   environment test; full Ray training still requires a functioning Ray runtime.
+- Measurement: on the 32x32 two-macro fixture, the float32 observation is
+  20,492 bytes while the compact snapshot serializes to 166 bytes. Scaling the
+  observation layout to 224x224 gives about 1,004,108 bytes for this reduced
+  mask fixture; the full six-mask production state is larger as documented in
+  `EFFICIENCY.md`.
 
 ## Phase 9: isolated asynchronous physical evaluation
 

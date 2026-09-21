@@ -1,4 +1,5 @@
 import pathlib
+import pickle
 import sys
 import unittest
 from types import SimpleNamespace
@@ -121,6 +122,13 @@ class RewardGranularityTest(unittest.TestCase):
         rebuilt.reset()
         actual = rebuilt.rebuild_state(snapshot)
         np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-6)
+
+    def test_compact_snapshot_is_smaller_than_observation(self):
+        env = make_env("step")
+        state = env.reset()
+        env.step(5 * env.grid + 5)
+        snapshot_bytes = len(pickle.dumps(env.compact_snapshot(), protocol=4))
+        self.assertLess(snapshot_bytes, state.nbytes)
 
 
 if __name__ == "__main__":
