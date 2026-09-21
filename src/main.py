@@ -383,7 +383,10 @@ def run(ray_envs, agent, args, reward_scaling_flag=False, store_transitions=True
         for idx in range(args.rollout_batch_size):
             if store_transitions:
                 trans = Transition(
-                    state=states[idx].copy(),
+                    # Store half precision on the host; PPO widens once when
+                    # assembling the update tensor.  This removes the large
+                    # float32 transition footprint without changing inference.
+                    state=states[idx].astype(np.float16, copy=True),
                     action=actions[idx],
                     reward=th.tensor(rewards[idx]) / 200.0,
                     action_log_prob=action_log_probs[idx],

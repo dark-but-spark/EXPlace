@@ -85,6 +85,13 @@ class RewardGranularityTest(unittest.TestCase):
         _, updated_reward, _, _ = updated_env.step(5 * updated_env.grid + 5)
         self.assertAlmostEqual(updated_reward, 0.5 * baseline_reward)
 
+    def test_transition_observation_can_use_half_precision(self):
+        env = make_env("step")
+        state = env.reset()
+        compact = state.astype(np.float16, copy=True)
+        self.assertEqual(compact.nbytes, state.nbytes // 2)
+        np.testing.assert_allclose(compact.astype(np.float32), state, rtol=1e-3, atol=1e-3)
+
 
 if __name__ == "__main__":
     unittest.main()

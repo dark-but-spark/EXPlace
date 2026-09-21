@@ -79,6 +79,16 @@ class StateParsing:
         state = np.concatenate(state_parts, dtype=np.float32)
         return state[np.newaxis, :]
 
+    def compact_state(self, state):
+        """Return the scalar placement metadata used by the value function.
+
+        Actor transitions still use the full observation when sampled, but this
+        helper provides a stable compact representation for buffers and tooling
+        that only need the macro index and size metadata.
+        """
+        state = np.asarray(state)
+        return np.asarray(state[..., :1], dtype=np.float32).copy()
+
     def state2canvas(self, state):
         """Extract canvas (and optional prototype_canvas) for sequential global input. Returns [B, canvas_num, grid, grid]."""
         canvas_num = 2 if self.args.prototype_flag else 1

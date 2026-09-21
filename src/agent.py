@@ -74,7 +74,12 @@ class PPOAgent():
     def update(self):
         if self.counter % self.buffer_capacity == 0:
             t_start = time.time() #########
-            state = th.tensor(np.concatenate([t.state for t in self.buffer], axis=0), dtype=th.float32)
+            # Keep rollout observations in compact host memory.  Conversion to
+            # float32 happens once per PPO update, immediately before device
+            # transfer, preserving the actor's historical numerical path.
+            state = th.from_numpy(np.concatenate(
+                [np.asarray(t.state, dtype=np.float16) for t in self.buffer], axis=0
+            )).float()
             action = th.tensor(np.array([t.action for t in self.buffer]), dtype=th.float).view(-1, 1).to(self.args.device)
             reward = th.stack([t.reward.to(self.args.device) for t in self.buffer]).view(-1, 1)
             # reward = th.tensor(np.array([t.reward for t in self.buffer]), dtype=th.float).view(-1, 1).to(self.args.device)
@@ -143,6 +148,11 @@ class PPOAgent():
     def store_transition(self, transition):
         self.counter += 1
         self.buffer.append(transition)
+
+    def store_rollout(self, rollout):
+        """Append a worker-produced rollout without per-step Ray calls."""
+        for transition in rollout:
+            self.store_transition(transition)
 
     def save_model(self, episode, best_so_far=False, path=None, filename=None):
         base_path = path if path is not None else self.args.log_dir
