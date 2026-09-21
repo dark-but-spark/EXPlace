@@ -28,3 +28,13 @@
   reconstruction. It does not yet remove the multi-channel representation from
   Ray messages; that requires a worker-side state cache and a separate rollout
   protocol.
+
+## Phase 2: PPO batch device staging
+
+- Change: state, action, reward, old log-probability, done flags, and return
+  targets are moved to the configured device once per PPO update. Minibatch
+  iterations now index already-resident tensors instead of issuing repeated
+  `.to(device)` calls.
+- Compatibility: model inputs and loss calculations are unchanged.
+- Verification: the full unit suite and a CPU update smoke test must pass before
+  this phase is considered complete; GPU transfer timing requires a CUDA node.

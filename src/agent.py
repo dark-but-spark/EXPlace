@@ -79,12 +79,12 @@ class PPOAgent():
             # transfer, preserving the actor's historical numerical path.
             state = th.from_numpy(np.concatenate(
                 [np.asarray(t.state, dtype=np.float16) for t in self.buffer], axis=0
-            )).float()
-            action = th.tensor(np.array([t.action for t in self.buffer]), dtype=th.float).view(-1, 1).to(self.args.device)
-            reward = th.stack([t.reward.to(self.args.device) for t in self.buffer]).view(-1, 1)
+            )).float().to(self.args.device)
+            action = th.tensor(np.array([t.action for t in self.buffer]), dtype=th.float, device=self.args.device).view(-1, 1)
+            reward = th.stack([t.reward for t in self.buffer]).view(-1, 1).to(self.args.device)
             # reward = th.tensor(np.array([t.reward for t in self.buffer]), dtype=th.float).view(-1, 1).to(self.args.device)
-            old_action_log_prob = th.tensor(np.array([t.action_log_prob for t in self.buffer]), dtype=th.float).view(-1, 1).to(self.args.device)
-            done = th.tensor(np.array([t.done for t in self.buffer], dtype=np.int32), dtype=th.int32).view(-1, 1).to(self.args.device)
+            old_action_log_prob = th.tensor(np.array([t.action_log_prob for t in self.buffer]), dtype=th.float, device=self.args.device).view(-1, 1)
+            done = th.tensor(np.array([t.done for t in self.buffer], dtype=np.int32), dtype=th.int32, device=self.args.device).view(-1, 1)
             del self.buffer[:]
             
             # Calculate cumulative returns
@@ -102,7 +102,7 @@ class PPOAgent():
                 target = r + return_gamma * target
                 target_list.append(target)
             target_list.reverse()
-            target_v_all = th.tensor(np.array([t for t in target_list]), dtype=th.float32).view(-1, 1).to(self.args.device)
+            target_v_all = th.tensor(np.array([t for t in target_list]), dtype=th.float32, device=self.args.device).view(-1, 1)
             
             actor_loss_lst  = []
             critic_loss_lst = []
@@ -111,7 +111,7 @@ class PPOAgent():
                 for index in tqdm(BatchSampler(SubsetRandomSampler(range(self.buffer_capacity)), batch_size, False),
                     disable = self.args.disable_tqdm):
                     self.training_step += 1
-                    batch_state = state[index].to(self.args.device)
+                    batch_state = state[index]
                     action_prob = self.actor(batch_state)
                     dist = Categorical(action_prob)
                     action_log_prob = dist.log_prob(action[index].squeeze())
