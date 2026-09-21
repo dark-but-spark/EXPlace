@@ -171,6 +171,9 @@ class ProblemInstance():
             params.load(os.path.join("DREAMPlace/test/iccad2015.ot", f'{self.benchmark}.json'))
         else:
             params.load(os.path.join("DREAMPlace/test/or_cases", f'{self.benchmark}.json'))
+        # Benchmark JSON files may request GPU even when the RL config or the
+        # current host is CPU-only. Keep both parts of the pipeline consistent.
+        params.gpu = int(getattr(self.args, 'use_cuda', False) and th.cuda.is_available())
         return params
 
     def _real_to_grid(self, raw_x, raw_y):

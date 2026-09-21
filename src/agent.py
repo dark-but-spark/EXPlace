@@ -85,11 +85,16 @@ class PPOAgent():
             # Calculate cumulative returns
             target_list = []
             target = 0
+            return_gamma = self.args.gamma
+            if getattr(self.args, 'reward_granularity', 'step') == 'global':
+                # A terminal whole-placement score should reach early macros
+                # without exponentially vanishing over a long placement.
+                return_gamma = getattr(self.args, 'global_reward_gamma', 1.0)
             for i in range(reward.shape[0]-1, -1, -1):
                 if done[i, 0] == 1:
                     target = 0
                 r = reward[i, 0].item()
-                target = r + self.args.gamma * target
+                target = r + return_gamma * target
                 target_list.append(target)
             target_list.reverse()
             target_v_all = th.tensor(np.array([t for t in target_list]), dtype=th.float32).view(-1, 1).to(self.args.device)
@@ -101,12 +106,15 @@ class PPOAgent():
                 for index in tqdm(BatchSampler(SubsetRandomSampler(range(self.buffer_capacity)), batch_size, False),
                     disable = self.args.disable_tqdm):
                     self.training_step += 1
-                    action_prob = self.actor(state[index].to(self.args.device))
+                    batch_state = state[index].to(self.args.device)
+                    action_prob = self.actor(batch_state)
                     dist = Categorical(action_prob)
                     action_log_prob = dist.log_prob(action[index].squeeze())
                     ratio = th.exp(action_log_prob - old_action_log_prob[index].squeeze())
                     target_v = target_v_all[index]
-                    critic_output = self.critic(state[index].to(self.args.device))
+                    # The critic currently uses only place_idx (column 0). Avoid
+                    # copying the full multi-channel placement state twice.
+                    critic_output = self.critic(batch_state[:, :1])
                     advantage = (target_v - critic_output).detach()
                     L1 = ratio * advantage.squeeze() 
                     L2 = th.clamp(ratio, 1-self.args.clip_param, 1+self.args.clip_param) * advantage.squeeze() 
@@ -117,7 +125,7 @@ class PPOAgent():
                     nn.utils.clip_grad_norm_(self.actor.parameters(), self.args.max_grad_norm)
                     self.actor_opt.step()
 
-                    value_loss = nn.functional.smooth_l1_loss(self.critic(state[index].to(self.args.device)), target_v)
+                    value_loss = nn.functional.smooth_l1_loss(critic_output, target_v)
                     self.critic_opt.zero_grad()
                     value_loss.backward()
                     nn.utils.clip_grad_norm_(self.critic.parameters(), self.args.max_grad_norm)
@@ -151,7 +159,8 @@ class PPOAgent():
             {
                 'actor': self.actor.state_dict(),
                 'critic': self.critic.state_dict(),
-                'episode': episode
+                'episode': episode,
+                'reward_weights': list(self.args.trade_off_coeff),
             },
             target_path
         )
@@ -164,6 +173,13 @@ class PPOAgent():
         else:
             self.actor.load_state_dict(checkpoint['model_state_dict'])
             self.critic.load_state_dict(checkpoint['critic_state_dict'])
+        if 'reward_weights' in checkpoint:
+            self.set_reward_weights(checkpoint['reward_weights'])
+
+    def set_reward_weights(self, weights):
+        """Keep checkpoint metadata and the actor soft mask in sync."""
+        self.args.trade_off_coeff = list(weights)
+        self.actor.state_parsing.set_reward_weights(weights)
     
     def train(self):
         self.training = True

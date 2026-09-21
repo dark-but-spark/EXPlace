@@ -105,11 +105,23 @@ class PlaceEnv():
         
         # trade-off parameters dict
         self.trade_off_coeff = {mask_name: args.trade_off_coeff[i] for i, mask_name in enumerate(args.used_masks[:-1])} # last one is position mask
+        self.reward_granularity = getattr(args, 'reward_granularity', 'step')
+        if self.reward_granularity not in ('step', 'global'):
+            raise ValueError("reward_granularity must be 'step' or 'global'")
         
         # Prune dataflow_mat at initialization, only keep the top 10% strongest connections
         if self.args.dataflow_cutoff > 0:
             keep_ratio = 1 - self.args.dataflow_cutoff
             self.prune_dataflow_mat(keep_ratio=keep_ratio)
+
+    def set_reward_weights(self, weights):
+        """Update reward and actor-mask coefficients between episodes."""
+        mask_names = self.args.used_masks[:-1]
+        if len(weights) != len(mask_names):
+            raise ValueError(f"expected {len(mask_names)} reward weights, got {len(weights)}")
+        self.args.trade_off_coeff = list(weights)
+        self.trade_off_coeff = dict(zip(mask_names, weights))
+        self.state_parsing.set_reward_weights(weights)
 
     def reset(self, reward_scaling_flag=False, corner_flag=False, visualize_flag=False):
         self.place_idx = 0
@@ -317,7 +329,11 @@ class PlaceEnv():
         # clear next_masks_norm
         self.next_masks_norm = {mask_name: None for mask_name in self.args.used_masks}
 
-        return self.state.copy(), reward, done, info
+        learning_reward = reward
+        if self.reward_granularity == 'global':
+            learning_reward = total_reward if done else 0.0
+
+        return self.state.copy(), learning_reward, done, info
 
     def set_place_order_maskplace(self):
         # original order of maskplace (Lai et al., NeurIPS2021)

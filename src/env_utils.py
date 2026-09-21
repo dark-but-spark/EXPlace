@@ -243,6 +243,7 @@ def create_single_env(args, problem):
     args.ratio_x = env_params['ratio_x']
     args.ratio_y = env_params['ratio_y']
     args.ratio_sum = env_params['ratio_x'] + env_params['ratio_y']
+    args.n_macro = len(env_params['macro_pos'] if 'macro_pos' in env_params.keys() else env_params['macro_pos_prototype'])
     env = PlaceEnv(args, env_params=env_params)
     return env
 
@@ -265,7 +266,11 @@ def init_ray_envs(args, num_envs, problem):
     # Determine GPU allocation strategy
     # If using GPU, specify the number of available GPUs
     import torch
-    num_gpus_available = torch.cuda.device_count() if torch.cuda.is_available() else 0
+    num_gpus_available = (
+        torch.cuda.device_count()
+        if getattr(args, 'use_cuda', False) and torch.cuda.is_available()
+        else 0
+    )
     
     ray.init(
         ignore_reinit_error=True, 
@@ -296,6 +301,8 @@ def init_ray_envs(args, num_envs, problem):
             return self.env.reset(reward_scaling_flag, corner_flag, visualize_flag)
         def step(self, action):
             return self.env.step(action)
+        def set_reward_weights(self, weights):
+            return self.env.set_reward_weights(weights)
         def visualize_placement(self, i_episode):
             return self.env.visualize_placement(i_episode)
         def visualize_prototype(self):
@@ -303,4 +310,4 @@ def init_ray_envs(args, num_envs, problem):
     
     # Create ray workers, each will create its own environment
     ray_envs = [RayEnvWorker.remote(args, env_params) for _ in range(num_envs)]
-    return ray_envs 
+    return ray_envs

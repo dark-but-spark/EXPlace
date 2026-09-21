@@ -2,6 +2,7 @@
 Log-related helper functions for training metrics, runtime and best metrics CSV.
 """
 import os
+import csv
 
 
 def save_runtime(path, episode, state_transition_time, training_time):
@@ -45,3 +46,23 @@ def save_eval_metrics(path, writer, episode, hpwl, hierarchy_cost, regularity, d
         writer.add_scalar('cost/gp_hpwl', gp_hpwl, episode)
         writer.add_scalar('loss/actor_loss', actor_loss, episode)
         writer.add_scalar('loss/critic_loss', critic_loss, episode)
+
+
+def save_reward_weights(path, episode, weights, ppa_penalty='', correlations=None, updated=False):
+    """Append one adaptive-reward observation in an analysis-friendly format."""
+    correlations = correlations or {}
+    mask_names = list(weights.keys())
+    fieldnames = (
+        ['episode', 'ppa_penalty', 'updated']
+        + [f'weight_{name}' for name in mask_names]
+        + [f'corr_{name}' for name in mask_names]
+    )
+    row = {'episode': episode, 'ppa_penalty': ppa_penalty, 'updated': int(updated)}
+    row.update({f'weight_{name}': value for name, value in weights.items()})
+    row.update({f'corr_{name}': value for name, value in correlations.items()})
+    file_exists = os.path.exists(path)
+    with open(path, 'a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(row)

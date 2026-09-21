@@ -158,6 +158,22 @@ This config is used for ICCAD / SuperBlue-style benchmarks. Main fields:
 
 To customize, copy `config/iccad.yaml` to a new file and run with `--config <new_name>`.
 
+### Incremental reward experiment
+
+The original fixed-weight, step-wise reward remains the default. This fork also
+contains an opt-in terminal global reward and a PPA-correlation reward-weight
+learner under `src/experiments/`. See [EXPERIMENTS.md](EXPERIMENTS.md) for the
+method, configuration, ablations, and output format. A ready-to-run setup is
+provided as `config/adaptive_global.yaml`.
+
+Runtime measurements, implemented optimizations, and remaining bottlenecks are
+documented in [EFFICIENCY.md](EFFICIENCY.md). The reproducible CPU smoke setup is
+`config/compare_quick.yaml`.
+
+For long-running multi-variant, multi-seed experiments, use
+`script/run_experiment_matrix.sh`; tmux launch, monitoring, resume, and matrix
+configuration examples are documented in [LONG_RUN.md](LONG_RUN.md).
+
 ---
 
 ## Project Structure

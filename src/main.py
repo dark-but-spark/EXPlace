@@ -26,8 +26,9 @@ from collections import namedtuple
 from types import SimpleNamespace
 from agent import PPOAgent
 from env_utils import init_ray_envs, create_single_env
+from experiments.adaptive_reward import build_reward_weight_learner
 from problem_instance import ProblemInstance
-from utils.log_utils import save_runtime, save_best_metrics, save_eval_metrics
+from utils.log_utils import save_runtime, save_best_metrics, save_eval_metrics, save_reward_weights
 
 CONFIG_DIR = os.path.join(ROOT_DIR, "config")
 
@@ -46,6 +47,9 @@ def process_args():
     parser.add_argument('--debug', action='store_true', default=False, help='Enable debug mode')
     parser.add_argument('--model_path', type=str, default=None, help='Path to trained model for test (e.g. best_model_ep1500.pt)')
     parser.add_argument('--visualize', action='store_true', default=False, help='Visualize step-by-step decisions during test (saves to log_dir/visulization_steps/)')
+    parser.add_argument('--reward-weight-mode', choices=['fixed', 'ppa_correlation'], help='Override reward weight experiment mode')
+    parser.add_argument('--reward-granularity', choices=['step', 'global'], help='Override step-wise or terminal global reward')
+    parser.add_argument('--log-dir', type=str, help='Override the root directory for run outputs')
     cmd_args = parser.parse_args()
     
     # Load config from YAML file
@@ -69,6 +73,28 @@ def process_args():
         config_dict['model_path'] = cmd_args.model_path
     if cmd_args.visualize:
         config_dict['visualize_flag'] = True
+    if cmd_args.reward_weight_mode is not None:
+        config_dict['reward_weight_mode'] = cmd_args.reward_weight_mode
+    if cmd_args.reward_granularity is not None:
+        config_dict['reward_granularity'] = cmd_args.reward_granularity
+    if cmd_args.log_dir is not None:
+        config_dict['log_dir'] = cmd_args.log_dir
+
+    # New experiment options are opt-in so historical configs keep their behavior.
+    config_dict.setdefault('reward_weight_mode', 'fixed')
+    config_dict.setdefault('reward_granularity', 'step')
+    config_dict.setdefault('evaluation_interval', 100)
+    config_dict.setdefault('evaluate_best_reward_with_dmp', True)
+    config_dict.setdefault('visualization_interval', 1)
+    config_dict.setdefault('visualize_prototype', True)
+    if not config_dict.get('used_masks') or config_dict['used_masks'][-1] != 'pos':
+        raise ValueError("used_masks must end with the hard position mask 'pos'")
+    if len(config_dict.get('trade_off_coeff', [])) != len(config_dict['used_masks']) - 1:
+        raise ValueError("trade_off_coeff must contain one value per non-position mask")
+    if config_dict['evaluation_interval'] <= 0:
+        raise ValueError("evaluation_interval must be positive")
+    if config_dict['reward_weight_mode'] == 'ppa_correlation' and not config_dict.get('use_dmp_for_evaluation'):
+        raise ValueError("ppa_correlation requires use_dmp_for_evaluation: True")
     
     # Convert to SimpleNamespace
     args = SimpleNamespace(**config_dict)
@@ -116,6 +142,8 @@ def main(args, config_path):
         os.makedirs(args.log_dir, exist_ok=True)
         # Save config file
         shutil.copy(config_path, args.log_dir)
+        with open(os.path.join(args.log_dir, 'resolved_config.yaml'), 'w') as f:
+            yaml.safe_dump(vars(args), f, sort_keys=True)
         os.makedirs(args.model_dir, exist_ok=True)
         os.makedirs(args.placement_dir, exist_ok=True)
         os.makedirs(args.visualization_dir, exist_ok=True)
@@ -123,8 +151,16 @@ def main(args, config_path):
     # Initialize TensorBoard writer
     writer = SummaryWriter(log_dir=args.log_dir)
 
-    # Initialize test problem
-    test_problem = ProblemInstance(args, args.design_name, init=False)
+    # Loading PlaceDB/NonLinearPlace is expensive and unnecessary for pure RL
+    # experiments backed by cached environment data.
+    needs_physical_evaluation = (
+        args.use_dmp_for_evaluation or args.evaluate_best_reward_with_dmp
+    )
+    test_problem = (
+        ProblemInstance(args, args.design_name, init=False)
+        if needs_physical_evaluation
+        else None
+    )
     # Debug mode
     if args.debug:
         env = create_single_env(args, test_problem)
@@ -142,13 +178,28 @@ def main(args, config_path):
     agent = PPOAgent(args=args)
     agent.train()
     seed_torch(args.seed)
+    reward_weight_learner = build_reward_weight_learner(args)
+    reward_weights_path = os.path.join(args.log_dir, 'reward_weights.csv')
+    if reward_weight_learner is not None and not args.debug:
+        save_reward_weights(
+            reward_weights_path,
+            episode=0,
+            weights=reward_weight_learner.weight_dict,
+        )
 
     # Reward scaling
     if args.use_reward_scaling:
-        _, _ = run(ray_envs, agent, args, reward_scaling_flag=True)
+        _, _ = run(
+            ray_envs,
+            agent,
+            args,
+            reward_scaling_flag=True,
+            store_transitions=False,
+        )
 
     # Visualize prototype
-    ray.get(ray_envs[0].visualize_prototype.remote())
+    if args.visualize_prototype:
+        ray.get(ray_envs[0].visualize_prototype.remote())
 
     # Training loop
     num_batches = args.episode // args.rollout_batch_size
@@ -176,7 +227,7 @@ def main(args, config_path):
 
         # Evaluate with DMP periodically
         gp_hpwl, tns, wns = 0., 0., 0.
-        if episode_counter % 100 == 0:
+        if episode_counter % args.evaluation_interval == 0:
             if args.use_dmp_for_evaluation:
                 trajectory = inference(args, model_path=None, agent=agent, test_env=test_env)
                 gp_hpwl, tns, wns = test_problem.evaluate(trajectory['macro_pos'])
@@ -198,6 +249,27 @@ def main(args, config_path):
                     save_best_metrics(best_metrics_path, episode_counter, 'gp_hpwl', tns, gp_hpwl, wns, reward_info, actor_loss, critic_loss)
                     print(f"Best GP-HPWL updated - GP-HPWL: {gp_hpwl}, TNS: {tns}, WNS: {wns}")
                 agent.train()
+                if reward_weight_learner is not None:
+                    weight_update = reward_weight_learner.observe(
+                        trajectory, gp_hpwl=gp_hpwl, tns=tns, wns=wns
+                    )
+                    new_weights = [
+                        weight_update.weights[name]
+                        for name in args.used_masks[:-1]
+                    ]
+                    sync_reward_weights(args, agent, test_env, ray_envs, new_weights)
+                    if not args.debug:
+                        save_reward_weights(
+                            reward_weights_path,
+                            episode=episode_counter,
+                            weights=weight_update.weights,
+                            ppa_penalty=weight_update.ppa_penalty,
+                            correlations=weight_update.correlations,
+                            updated=weight_update.updated,
+                        )
+                    for name, value in weight_update.weights.items():
+                        writer.add_scalar(f'reward_weight/{name}', value, episode_counter)
+                    print(f"Adaptive reward weights: {weight_update.weights}")
 
         if not args.debug:
             save_eval_metrics(
@@ -228,7 +300,11 @@ def main(args, config_path):
         if current_reward > best_reward:
             best_reward = current_reward
             best_reward_info = reward_info.copy()
-            if (macro_pos := reward_info.get('macro_pos')) and not args.debug:
+            if (
+                (macro_pos := reward_info.get('macro_pos'))
+                and not args.debug
+                and args.evaluate_best_reward_with_dmp
+            ):
                 gp_hpwl, _, _ = test_problem.evaluate(macro_pos)
                 test_problem.save_placement(os.path.join(args.placement_dir, 'best_reward.def'))
                 test_problem.plot(gp_hpwl, os.path.join(args.visualization_dir, 'best_reward.png'))
@@ -237,13 +313,21 @@ def main(args, config_path):
         if not args.debug:
             agent.save_model(episode=episode_counter, path=args.model_dir, filename='current_model.pt')
         # Visualize placement for the best env in this batch -> save to visualization dir (via args.visualization_dir in env)
-        ray.get(ray_envs[reward_info['batch_best_idx']].visualize_placement.remote(episode_counter))
+        if (
+            args.visualization_interval > 0
+            and episode_counter % args.visualization_interval == 0
+        ):
+            ray.get(ray_envs[reward_info['batch_best_idx']].visualize_placement.remote(episode_counter))
 
         # Print best episode info
         best_info_no_macro = best_reward_info.copy()
         if 'macro_pos' in best_info_no_macro:
             del best_info_no_macro['macro_pos']
-        print(f"Batch {batch_idx}/{num_batches} (Episode {episode_counter}) - Time: {time.time() - t_start:.2f}s")
+        print(
+            f"Batch {batch_idx}/{num_batches} (Episode {episode_counter}) - "
+            f"Time: {time.time() - t_start:.2f}s "
+            f"(rollout: {t_rollout:.2f}s, PPO: {t_train:.2f}s)"
+        )
         print(f"Best scaled_reward: {best_reward}")
         print(f"Best episode info: {best_info_no_macro}")
 
@@ -255,7 +339,15 @@ def main(args, config_path):
     ray.shutdown()
     return
 
-def run(ray_envs, agent, args, reward_scaling_flag=False):
+
+def sync_reward_weights(args, agent, test_env, ray_envs, weights):
+    """Apply an outer-loop weight update between complete rollouts."""
+    args.trade_off_coeff = list(weights)
+    agent.set_reward_weights(weights)
+    test_env.set_reward_weights(weights)
+    ray.get([env.set_reward_weights.remote(weights) for env in ray_envs])
+
+def run(ray_envs, agent, args, reward_scaling_flag=False, store_transitions=True):
     """
     Run one episode in parallel environments, return the reward_info with the best total_reward among all envs.
     Returns:
@@ -268,8 +360,13 @@ def run(ray_envs, agent, args, reward_scaling_flag=False):
     episode_infos = [None] * args.rollout_batch_size
     episode_rewards = [float('-inf')] * args.rollout_batch_size
     
-    # Collect all transitions for each environment
-    env_transitions = [[] for _ in range(args.rollout_batch_size)]
+    # Collect transitions only for training rollouts. Scaling warm-up needs
+    # actions and costs but not multi-megabyte state copies.
+    env_transitions = (
+        [[] for _ in range(args.rollout_batch_size)]
+        if store_transitions
+        else None
+    )
     
     while not dones:
         # Batch states for agent
@@ -282,12 +379,15 @@ def run(ray_envs, agent, args, reward_scaling_flag=False):
         
         # Collect transitions for each environment (don't store yet)
         for idx in range(args.rollout_batch_size):
-            trans = Transition(state=states[idx].copy(),  # Use copy to avoid reference issues
-                               action=actions[idx],
-                               reward=th.tensor(rewards[idx]) / 200.0,
-                               action_log_prob=action_log_probs[idx],
-                               done=dones_list[idx])
-            env_transitions[idx].append(trans)
+            if store_transitions:
+                trans = Transition(
+                    state=states[idx].copy(),
+                    action=actions[idx],
+                    reward=th.tensor(rewards[idx]) / 200.0,
+                    action_log_prob=action_log_probs[idx],
+                    done=dones_list[idx],
+                )
+                env_transitions[idx].append(trans)
             
             if dones_list[idx]:
                 episode_infos[idx] = infos[idx]
@@ -296,10 +396,12 @@ def run(ray_envs, agent, args, reward_scaling_flag=False):
         states = next_states
         dones = dones_list[0]
     
-    # Store transitions in episode order: all steps from env0, then all stepsps from env1, etc.
-    for env_idx in range(args.rollout_batch_size):
-        for trans in env_transitions[env_idx]:
-            agent.store_transition(trans)
+    # Scaling warm-up episodes calibrate min/max only and must not displace the
+    # first real training batch in the fixed-capacity PPO buffer.
+    if store_transitions:
+        for env_idx in range(args.rollout_batch_size):
+            for trans in env_transitions[env_idx]:
+                agent.store_transition(trans)
     
     # Find the best reward_info in this batch
     best_idx = int(np.argmax(episode_rewards))

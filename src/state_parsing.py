@@ -48,6 +48,14 @@ class StateParsing:
         self.args = args
         self.grid = args.grid
         self.g2 = self.grid * self.grid
+        self.set_reward_weights(args.trade_off_coeff)
+
+    def set_reward_weights(self, weights):
+        """Update the expert-mask weights used by the actor's soft mask."""
+        expected = len(self.args.used_masks) - 1
+        if len(weights) != expected:
+            raise ValueError(f"expected {expected} reward weights, got {len(weights)}")
+        self.reward_weights = np.asarray(weights, dtype=np.float64).copy()
     
     def get_state(self,
         place_idx, 
@@ -58,18 +66,17 @@ class StateParsing:
         size_y,
         prototype_canvas=None,
         ):
-        if prototype_canvas is None:
-            state = np.concatenate((np.array([place_idx]), canvas.flatten()), axis=0)
-        else:
-            state = np.concatenate((np.array([place_idx]), canvas.flatten(), prototype_canvas.flatten()), axis=0)
+        state_parts = [np.array([place_idx]), canvas.reshape(-1)]
+        if prototype_canvas is not None:
+            state_parts.append(prototype_canvas.reshape(-1))
+        state_parts.extend(mask.reshape(-1) for mask in masks.values())
+        state_parts.extend(mask.reshape(-1) for mask in next_masks.values())
+        state_parts.append(np.array([size_x / self.grid, size_y / self.grid]))
 
-        for mask_name in masks.keys():
-            state = np.concatenate((state, masks[mask_name].flatten()), axis=0)
-        
-        for mask_name in next_masks.keys():
-            state = np.concatenate((state, next_masks[mask_name].flatten()), axis=0)
-        
-        state = np.concatenate((state, np.array([size_x/self.grid, size_y/self.grid])), axis=0)
+        # The policy immediately consumes float32 tensors. Constructing the
+        # state in that dtype halves Ray traffic and PPO-buffer memory while a
+        # single concatenate avoids repeatedly copying the growing state.
+        state = np.concatenate(state_parts, dtype=np.float32)
         return state[np.newaxis, :]
 
     def state2canvas(self, state):
@@ -121,9 +128,7 @@ class StateParsing:
     def state2soft_mask(self, state):
         canvas_num = 2 if self.args.prototype_flag else 1
         mask_num = (state.shape[1] - canvas_num * self.g2 - 3) // (self.g2 * 2)
-        trade_off_coeff = {mask_name: self.args.trade_off_coeff[i] for i, mask_name in enumerate(self.args.used_masks[:-1])} # last one is position mask
-        trade_off_coeff["pos"] = 10.0
-        trade_off_coeff = np.array(list(trade_off_coeff.values()))
+        trade_off_coeff = np.concatenate((self.reward_weights, np.array([10.0])))
         if len(state.shape) == 1:
             trade_off_coeff = th.tensor(trade_off_coeff)[:, None].repeat(1, self.g2).to(state.device)
             masks = state[1 + self.g2 * canvas_num : 1 + self.g2 * (mask_num + canvas_num)].reshape(mask_num, self.g2)
@@ -136,4 +141,3 @@ class StateParsing:
             return soft_mask
         else:
             raise NotImplementedError
-        

@@ -1,0 +1,68 @@
+name: adaptive_global
+
+seed: 3
+gpu: 0
+use_cuda: True
+
+# PPO parameters
+clip_param: 0.2
+max_grad_norm: 0.5
+ppo_epoch: 10
+gamma: 0.95
+lr: 2.5e-3
+
+# Retained for compatibility with the original configuration surface.
+dpo_lr: 1.0e-4
+
+grid: 224
+episode: 1500
+PO_episode: 500
+epoch: 10
+PO_epoch: 10
+buffer_size: 10
+batch_size: 256
+preference_batch_size: 4
+rollout_batch_size: 10
+num_trajectories_per_iteration: 20
+
+used_masks: ["reg", "hier", "df", "wire", "port", "pos"]
+trade_off_coeff: [0.45, 0.2, 0.15, 0.15, 0.05]
+
+# Experimental extension: terminal whole-placement reward plus PPA-guided
+# adaptation of the four expert terms. The port prior remains fixed at 0.05.
+reward_granularity: global
+# Do not exponentially attenuate the terminal layout score for early macros.
+global_reward_gamma: 1.0
+reward_weight_mode: ppa_correlation
+learnable_masks: ["reg", "hier", "df", "wire"]
+reward_weight_min_observations: 4
+reward_weight_update_rate: 0.25
+reward_weight_temperature: 0.25
+reward_weight_prior_strength: 0.25
+reward_weight_min: 0.02
+evaluation_interval: 100
+ppa_hpwl_weight: 1.0
+ppa_tns_weight: 1.0
+ppa_wns_weight: 1.0
+
+dataflow_cutoff: 0.00
+halo: 0
+soft_coefficient: 1.0
+use_reward_scaling: True
+disable_tqdm: True
+core_area_block: 0
+load_dir: "rl_logs/superblue3/EXPlace/"
+corner_flag: False
+late_stage_episode: 0
+prototype_flag: False
+regulator_flag: False
+use_dmp_for_evaluation: True
+use_timer_for_evaluation: True
+# Periodic evaluation already records real PPA. Avoid an additional full DMP
+# call whenever the cheap proxy reward happens to improve.
+evaluate_best_reward_with_dmp: False
+visualize_prototype: True
+visualization_interval: 100
+actor_arch: parallel
+local_summary_k: 2
+log_dir: "./"
