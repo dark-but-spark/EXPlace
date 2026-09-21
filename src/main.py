@@ -89,6 +89,10 @@ def process_args():
     config_dict.setdefault('evaluate_best_reward_with_dmp', False)
     config_dict.setdefault('visualization_interval', 0)
     config_dict.setdefault('visualize_prototype', False)
+    config_dict.setdefault('mixed_precision', False)
+    config_dict.setdefault('amp_dtype', 'float16')
+    if config_dict['amp_dtype'] not in ('float16', 'bfloat16'):
+        raise ValueError("amp_dtype must be 'float16' or 'bfloat16'")
     if not config_dict.get('used_masks') or config_dict['used_masks'][-1] != 'pos':
         raise ValueError("used_masks must end with the hard position mask 'pos'")
     if len(config_dict.get('trade_off_coeff', [])) != len(config_dict['used_masks']) - 1:

@@ -43,6 +43,8 @@ class PPOAgent():
         self.training_step = 0
 
         self.training = False
+        self.mixed_precision = bool(getattr(args, 'mixed_precision', False)) and self.args.device != 'cpu'
+        self.amp_dtype = getattr(th, getattr(args, 'amp_dtype', 'float16'), th.float16)
     
     def select_action(self, state:np.array):
         """
@@ -62,7 +64,9 @@ class PPOAgent():
         # state: [batch, ...], do not add unsqueeze(0)
         state = th.from_numpy(state).float().to(self.args.device)
         with th.no_grad():
-            action_prob = self.actor(state)  # [batch, N]
+            with th.autocast(device_type=state.device.type, dtype=self.amp_dtype,
+                             enabled=self.mixed_precision):
+                action_prob = self.actor(state)  # [batch, N]
         dist = Categorical(action_prob)
         if self.training:
             action = dist.sample()  # [batch]
@@ -112,14 +116,18 @@ class PPOAgent():
                     disable = self.args.disable_tqdm):
                     self.training_step += 1
                     batch_state = state[index]
-                    action_prob = self.actor(batch_state)
+                    with th.autocast(device_type=batch_state.device.type, dtype=self.amp_dtype,
+                                     enabled=self.mixed_precision):
+                        action_prob = self.actor(batch_state)
                     dist = Categorical(action_prob)
                     action_log_prob = dist.log_prob(action[index].squeeze())
                     ratio = th.exp(action_log_prob - old_action_log_prob[index].squeeze())
                     target_v = target_v_all[index]
                     # The critic currently uses only place_idx (column 0). Avoid
                     # copying the full multi-channel placement state twice.
-                    critic_output = self.critic(batch_state[:, :1])
+                    with th.autocast(device_type=batch_state.device.type, dtype=self.amp_dtype,
+                                     enabled=self.mixed_precision):
+                        critic_output = self.critic(batch_state[:, :1])
                     advantage = (target_v - critic_output).detach()
                     L1 = ratio * advantage.squeeze() 
                     L2 = th.clamp(ratio, 1-self.args.clip_param, 1+self.args.clip_param) * advantage.squeeze() 

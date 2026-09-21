@@ -57,3 +57,11 @@
   useful for evaluation/precomputed action sequences without changing step
   semantics. Training still uses policy-dependent single steps until model
   synchronization is introduced and validated.
+
+## Phase 5: gated CNN mixed precision
+
+- Change: add opt-in AMP around actor and critic forward passes, supporting
+  `float16` or `bfloat16`. Defaults remain disabled and CPU execution never
+  enables AMP.
+- Gate: numerical comparison and GPU throughput measurement are required before
+  enabling this in production configs; no speedup claim is made on this host.
