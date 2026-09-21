@@ -5,8 +5,6 @@ import copy
 import numpy as np
 import ray
 
-from problem_instance import ProblemInstance
-
 
 @ray.remote(num_gpus=0)
 class AsyncPhysicalEvaluator:
@@ -14,6 +12,8 @@ class AsyncPhysicalEvaluator:
 
     def __init__(self, args, benchmark):
         # A worker must never share PlaceDB/OpenTimer state with training.
+        from problem_instance import ProblemInstance
+
         eval_args = copy.copy(args)
         eval_args.use_cuda = False
         eval_args.device = "cpu"
