@@ -18,6 +18,9 @@ class PerformanceDefaultsTest(unittest.TestCase):
         self.assertTrue(config.get("compact_transition", True))
         self.assertTrue(config["worker_rollout"])
         self.assertFalse(config["mixed_precision"])
+        self.assertTrue(config["mask_cache"])
+        self.assertTrue(config["vectorized_occupancy"])
+        self.assertTrue(config["batch_device_copy"])
 
 
 if __name__ == "__main__":

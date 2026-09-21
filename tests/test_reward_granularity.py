@@ -13,7 +13,7 @@ sys.path.insert(0, str(SRC_DIR))
 from place_env.place_env import PlaceEnv
 
 
-def make_env(reward_granularity):
+def make_env(reward_granularity, mask_cache=True, vectorized_occupancy=True):
     args = SimpleNamespace(
         grid=32,
         n_macro=2,
@@ -33,6 +33,8 @@ def make_env(reward_granularity):
         soft_coefficient=1.0,
         regularity_mode="corner_regular",
         log_dir="/tmp",
+        mask_cache=mask_cache,
+        vectorized_occupancy=vectorized_occupancy,
     )
     env_params = {
         "macro_pos": {0: (0, 0, 1, 1), 1: (2, 2, 1, 1)},
@@ -104,6 +106,12 @@ class RewardGranularityTest(unittest.TestCase):
         self.assertGreaterEqual(cache_size, 1)
         self.assertEqual(len(env._static_mask_cache), cache_size)
 
+    def test_static_mask_cache_can_be_disabled(self):
+        env = make_env("step", mask_cache=False)
+        env.reset()
+        env._get_static_mask("displacement", 0)
+        self.assertEqual(env._static_mask_cache, {})
+
     def test_position_mask_marks_overlap_after_placement(self):
         env = make_env("step")
         env.reset()
@@ -111,6 +119,17 @@ class RewardGranularityTest(unittest.TestCase):
         mask = env.get_position_mask(1)
         self.assertEqual(mask[5, 5], 1)
         self.assertEqual(mask[0, 0], 0)
+
+    def test_vectorized_position_mask_matches_reference_path(self):
+        vectorized = make_env("step", vectorized_occupancy=True)
+        reference = make_env("step", vectorized_occupancy=False)
+        vectorized.reset()
+        reference.reset()
+        vectorized.step(5 * vectorized.grid + 5)
+        reference.step(5 * reference.grid + 5)
+        np.testing.assert_array_equal(
+            vectorized.get_position_mask(1), reference.get_position_mask(1)
+        )
 
     def test_compact_snapshot_rebuilds_observation(self):
         env = make_env("step")

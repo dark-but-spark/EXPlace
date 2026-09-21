@@ -648,17 +648,26 @@ class PlaceEnv():
         mask = np.zeros((self.grid, self.grid))
         _, _, size_x, size_y = self.macro_pos[macro_to_place]
 
-        # Integral image gives exact overlap for every candidate top-left in
-        # O(grid^2), without scanning Python objects for every placed macro.
-        occupied = self._occupied.astype(np.int32, copy=False)
-        prefix = np.pad(occupied, ((1, 0), (1, 0))).cumsum(0).cumsum(1)
-        sums = (
-            prefix[size_x:, size_y:]
-            - prefix[:-size_x, size_y:]
-            - prefix[size_x:, :-size_y]
-            + prefix[:-size_x, :-size_y]
-        )
-        mask[:self.grid - size_x + 1, :self.grid - size_y + 1] = (sums > 0)
+        if getattr(self.args, 'vectorized_occupancy', True):
+            # Integral image gives exact overlap for every candidate top-left
+            # in O(grid^2), without scanning Python objects per macro.
+            occupied = self._occupied.astype(np.int32, copy=False)
+            prefix = np.pad(occupied, ((1, 0), (1, 0))).cumsum(0).cumsum(1)
+            sums = (
+                prefix[size_x:, size_y:]
+                - prefix[:-size_x, size_y:]
+                - prefix[size_x:, :-size_y]
+                + prefix[:-size_x, :-size_y]
+            )
+            mask[:self.grid - size_x + 1, :self.grid - size_y + 1] = (sums > 0)
+        else:
+            # Reference implementation retained for controlled A/B timing.
+            for macro in self.macro_placed:
+                start_x = max(0, self.macro_pos[macro][0] - size_x + 1)
+                start_y = max(0, self.macro_pos[macro][1] - size_y + 1)
+                end_x = min(self.macro_pos[macro][0] + self.macro_pos[macro][2] - 1, self.grid)
+                end_y = min(self.macro_pos[macro][1] + self.macro_pos[macro][3] - 1, self.grid)
+                mask[start_x:end_x + 1, start_y:end_y + 1] = 1
 
         # Mark positions that would go out of bounds and core area block
         block = self.args.core_area_block
@@ -670,6 +679,8 @@ class PlaceEnv():
         return mask
 
     def _get_static_mask(self, mask_name, macro_to_place):
+        if not getattr(self.args, 'mask_cache', True):
+            return self.mask_functions[mask_name](macro_to_place)
         key = (mask_name, macro_to_place)
         if key not in self._static_mask_cache:
             self._static_mask_cache[key] = self.mask_functions[mask_name](macro_to_place)

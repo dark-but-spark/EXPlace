@@ -149,3 +149,19 @@
   failed before worker creation with Ray's `Timed out waiting for file
   /tmp/ray/.../gcs_server_port_*`. This is an infrastructure failure; no
   rollout-path timing is claimed from this run.
+
+## Phase 11: positive A/B switches for optimized paths
+
+- Change: add `mask_cache`, `vectorized_occupancy`, and `batch_device_copy`
+  configuration switches. All default to `true`; setting one to `false`
+  restores the corresponding pre-optimization implementation for controlled
+  measurements.
+- Verification: the cache-disabled path, vectorized/reference position-mask
+  equivalence, and both PPO device-staging paths are covered by unit tests.
+  Full suite result: 21/21 passing; Python syntax checks pass.
+- Measurement: no new runtime multiplier is claimed in this container. These
+  switches make the required paired benchmark possible on a functioning Ray
+  and/or CUDA host. The expected speedup must be computed as
+  `baseline_time / optimized_time` using identical seeds and workloads.
+- Compatibility: existing configs receive the optimized defaults through
+  `process_args`; `compare_quick.yaml` records the three values explicitly.

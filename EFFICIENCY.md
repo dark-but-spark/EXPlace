@@ -28,6 +28,12 @@ The more important effect is the 50% reduction in observation/buffer memory.
 
 ## Implemented efficiency fixes
 
+The main optimized paths have positive A/B switches. `mask_cache`,
+`vectorized_occupancy`, and `batch_device_copy` default to `true`; set one to
+`false` to run the matching reference implementation without changing other
+options. The same convention is used by `compact_transition`,
+`worker_rollout`, `mixed_precision`, and `async_evaluation`.
+
 - Physical evaluation is initialized only when a configured code path uses it.
 - Best-reward DREAMPlace evaluation and visualization can be disabled for RL
   ablations while their historical defaults remain enabled.
@@ -62,3 +68,22 @@ Recommended next work, in priority order:
 Use `config/compare_quick.yaml` with `--reward-granularity step` or `global` to
 repeat the smoke comparison. Enable physical evaluation separately for final
 quality comparisons.
+
+## Archive And CUDA 12 Work
+
+The completed long-run results and their limitations are archived in
+`long_runs/20260920_140834/RESULT_ANALYSIS.md`; its tracked, machine-readable
+summary is under `experiment_records/20260920_superblue18_4x3/`. The CUDA 12 operator rewrite
+is tracked separately in `CUDA12_MIGRATION.md`; the existing cu118/DREAMPlace
+installation remains the reference baseline until the rewritten operators pass
+both numerical and placement-level checks.
+
+The current priority is not to assume that CUDA 12 alone will accelerate the
+pipeline. First measure GPU execution with the correct native `sm_XX` target,
+then compare isolated DREAMPlace timings. Ray/state construction, PPO data
+movement, OpenTimer, repeated initialization, and file generation are
+separate bottlenecks and must not be attributed to CUDA compiler changes.
+
+For the prioritized implementation list, see `TODO.md`. For historical run
+status, raw artifact locations, and the distinction between dry-runs, smoke
+tests, and formal matrix results, see `EXPERIMENT_ARCHIVE.md`.

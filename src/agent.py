@@ -6,6 +6,7 @@ import torch
 from tqdm import tqdm
 import os
 import time
+from contextlib import nullcontext
 from torchvision.models import resnet18
 from torch.distributions import Categorical
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
@@ -45,7 +46,10 @@ class PPOAgent():
         self.training = False
         self.state_rebuilder = None
         self.mixed_precision = bool(getattr(args, 'mixed_precision', False)) and self.args.device != 'cpu'
-        self.amp_dtype = getattr(th, getattr(args, 'amp_dtype', 'float16'), th.float16)
+        configured_amp_dtype = getattr(th, getattr(args, 'amp_dtype', 'float16'), th.float16)
+        # Some PyTorch CPU builds validate autocast dtype even when disabled;
+        # use float32 whenever AMP is inactive to keep the CPU path portable.
+        self.amp_dtype = configured_amp_dtype if self.mixed_precision else th.float32
 
     def set_state_rebuilder(self, rebuilder):
         """Set the environment callback used to materialize compact states."""
@@ -69,8 +73,8 @@ class PPOAgent():
         # state: [batch, ...], do not add unsqueeze(0)
         state = th.from_numpy(state).float().to(self.args.device)
         with th.no_grad():
-            with th.autocast(device_type=state.device.type, dtype=self.amp_dtype,
-                             enabled=self.mixed_precision):
+            with (th.autocast(device_type=state.device.type, dtype=self.amp_dtype)
+                  if self.mixed_precision else nullcontext()):
                 action_prob = self.actor(state)  # [batch, N]
         dist = Categorical(action_prob)
         if self.training:
@@ -83,6 +87,7 @@ class PPOAgent():
     def update(self):
         if self.counter % self.buffer_capacity == 0:
             t_start = time.time() #########
+            stage_batch = getattr(self.args, 'batch_device_copy', True)
             # Keep rollout observations in compact host memory.  Conversion to
             # float32 happens once per PPO update, immediately before device
             # transfer, preserving the actor's historical numerical path.
@@ -90,16 +95,22 @@ class PPOAgent():
                 if self.state_rebuilder is None:
                     raise RuntimeError("compact transitions require a state rebuilder")
                 states = [self.state_rebuilder(t.state) for t in self.buffer]
-                state = th.from_numpy(np.concatenate(states, axis=0)).float().to(self.args.device)
+                state = th.from_numpy(np.concatenate(states, axis=0)).float()
             else:
                 state = th.from_numpy(np.concatenate(
                     [np.asarray(t.state, dtype=np.float16) for t in self.buffer], axis=0
-                )).float().to(self.args.device)
-            action = th.tensor(np.array([t.action for t in self.buffer]), dtype=th.float, device=self.args.device).view(-1, 1)
-            reward = th.stack([t.reward for t in self.buffer]).view(-1, 1).to(self.args.device)
+                )).float()
+            action = th.tensor(np.array([t.action for t in self.buffer]), dtype=th.float).view(-1, 1)
+            reward = th.stack([t.reward for t in self.buffer]).view(-1, 1)
             # reward = th.tensor(np.array([t.reward for t in self.buffer]), dtype=th.float).view(-1, 1).to(self.args.device)
-            old_action_log_prob = th.tensor(np.array([t.action_log_prob for t in self.buffer]), dtype=th.float, device=self.args.device).view(-1, 1)
-            done = th.tensor(np.array([t.done for t in self.buffer], dtype=np.int32), dtype=th.int32, device=self.args.device).view(-1, 1)
+            old_action_log_prob = th.tensor(np.array([t.action_log_prob for t in self.buffer]), dtype=th.float).view(-1, 1)
+            done = th.tensor(np.array([t.done for t in self.buffer], dtype=np.int32), dtype=th.int32).view(-1, 1)
+            if stage_batch:
+                state = state.to(self.args.device)
+                action = action.to(self.args.device)
+                reward = reward.to(self.args.device)
+                old_action_log_prob = old_action_log_prob.to(self.args.device)
+                done = done.to(self.args.device)
             del self.buffer[:]
             
             # Calculate cumulative returns
@@ -117,7 +128,9 @@ class PPOAgent():
                 target = r + return_gamma * target
                 target_list.append(target)
             target_list.reverse()
-            target_v_all = th.tensor(np.array([t for t in target_list]), dtype=th.float32, device=self.args.device).view(-1, 1)
+            target_v_all = th.tensor(np.array([t for t in target_list]), dtype=th.float32).view(-1, 1)
+            if stage_batch:
+                target_v_all = target_v_all.to(self.args.device)
             
             actor_loss_lst  = []
             critic_loss_lst = []
@@ -127,17 +140,26 @@ class PPOAgent():
                     disable = self.args.disable_tqdm):
                     self.training_step += 1
                     batch_state = state[index]
-                    with th.autocast(device_type=batch_state.device.type, dtype=self.amp_dtype,
-                                     enabled=self.mixed_precision):
+                    if not stage_batch:
+                        batch_state = batch_state.to(self.args.device)
+                        batch_action = action[index].to(self.args.device)
+                        batch_old_action_log_prob = old_action_log_prob[index].to(self.args.device)
+                        batch_target_v = target_v_all[index].to(self.args.device)
+                    else:
+                        batch_action = action[index]
+                        batch_old_action_log_prob = old_action_log_prob[index]
+                        batch_target_v = target_v_all[index]
+                    with (th.autocast(device_type=batch_state.device.type, dtype=self.amp_dtype)
+                          if self.mixed_precision else nullcontext()):
                         action_prob = self.actor(batch_state)
                     dist = Categorical(action_prob)
-                    action_log_prob = dist.log_prob(action[index].squeeze())
-                    ratio = th.exp(action_log_prob - old_action_log_prob[index].squeeze())
-                    target_v = target_v_all[index]
+                    action_log_prob = dist.log_prob(batch_action.squeeze())
+                    ratio = th.exp(action_log_prob - batch_old_action_log_prob.squeeze())
+                    target_v = batch_target_v
                     # The critic currently uses only place_idx (column 0). Avoid
                     # copying the full multi-channel placement state twice.
-                    with th.autocast(device_type=batch_state.device.type, dtype=self.amp_dtype,
-                                     enabled=self.mixed_precision):
+                    with (th.autocast(device_type=batch_state.device.type, dtype=self.amp_dtype)
+                          if self.mixed_precision else nullcontext()):
                         critic_output = self.critic(batch_state[:, :1])
                     advantage = (target_v - critic_output).detach()
                     L1 = ratio * advantage.squeeze() 

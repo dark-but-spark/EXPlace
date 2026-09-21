@@ -30,6 +30,9 @@ global_reward_gamma: 1.0
 compact_transition: true
 worker_rollout: true
 mixed_precision: false
+mask_cache: true
+vectorized_occupancy: true
+batch_device_copy: true
 
 dataflow_cutoff: 0.00
 halo: 0

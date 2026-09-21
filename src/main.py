@@ -95,6 +95,9 @@ def process_args():
     config_dict.setdefault('compact_transition', True)
     config_dict.setdefault('worker_rollout', True)
     config_dict.setdefault('async_evaluation', True)
+    config_dict.setdefault('mask_cache', True)
+    config_dict.setdefault('vectorized_occupancy', True)
+    config_dict.setdefault('batch_device_copy', True)
     if config_dict['amp_dtype'] not in ('float16', 'bfloat16'):
         raise ValueError("amp_dtype must be 'float16' or 'bfloat16'")
     if not config_dict.get('used_masks') or config_dict['used_masks'][-1] != 'pos':
