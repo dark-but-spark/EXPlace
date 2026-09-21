@@ -65,3 +65,22 @@
   enables AMP.
 - Gate: numerical comparison and GPU throughput measurement are required before
   enabling this in production configs; no speedup claim is made on this host.
+
+## Phase 6: vectorized occupancy updates
+
+- Change: maintain a boolean occupied grid and derive the position mask with an
+  integral image. This removes the Python loop over every placed macro while
+  preserving exact rectangle-overlap semantics and boundary blocking.
+- Verification: the environment test confirms overlap and free-position results;
+  full suite result for this phase is 14/14 passing.
+- Measurement note: benchmark-level timing still requires a Ray run; the local
+  Ray GCS startup is unavailable in this container.
+
+## Async physical evaluation audit
+
+- A first thread-based draft was rejected because sharing `ProblemInstance`,
+  OpenTimer, or the training environment across threads is unsafe and it lost
+  existing best-metric handling.
+- The safe implementation target is a single Ray evaluator actor owning an
+  isolated `ProblemInstance`, with at most one in-flight deep-copied placement;
+  results must be consumed without changing the training episode counter.

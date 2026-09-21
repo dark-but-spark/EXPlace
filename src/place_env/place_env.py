@@ -106,6 +106,8 @@ class PlaceEnv():
         # metadata. Cache them once per environment; dynamic masks (wire/dataflow
         # / hierarchy / position) remain computed from the current placement.
         self._static_mask_cache = {}
+        self._occupied = np.zeros((self.grid, self.grid), dtype=np.bool_)
+        self._boundary_mask_cache = {}
         
         # trade-off parameters dict
         self.trade_off_coeff = {mask_name: args.trade_off_coeff[i] for i, mask_name in enumerate(args.used_masks[:-1])} # last one is position mask
@@ -137,6 +139,7 @@ class PlaceEnv():
         self.reward_scaling_flag = reward_scaling_flag
         self.macro_pos = self.macro_pos_prototype.copy()
         self._static_mask_cache.clear()
+        self._occupied.fill(False)
         self.macro_placed = []
 
         if corner_flag:
@@ -251,6 +254,7 @@ class PlaceEnv():
         # assert (0 <= x and x + size_x <= self.grid and 0 <= y and y + size_y <= self.grid), "Macro is out of bounds"
         
         self.canvas = self.__draw_canvas(self.canvas, x, y, size_x, size_y)
+        self._occupied[x:x + size_x, y:y + size_y] = True
         self.macro_pos[macro] = (x, y, size_x, size_y)
         self.macro_placed.append(macro)
         
@@ -569,14 +573,18 @@ class PlaceEnv():
         """
         mask = np.zeros((self.grid, self.grid))
         _, _, size_x, size_y = self.macro_pos[macro_to_place]
-        
-        # Mark positions that would overlap with placed macros
-        for macro in self.macro_placed:
-            start_x = max(0, self.macro_pos[macro][0] - size_x + 1)
-            start_y = max(0, self.macro_pos[macro][1] - size_y + 1)
-            end_x = min(self.macro_pos[macro][0] + self.macro_pos[macro][2] - 1, self.grid)
-            end_y = min(self.macro_pos[macro][1] + self.macro_pos[macro][3] - 1, self.grid)
-            mask[start_x: end_x + 1, start_y: end_y + 1] = 1
+
+        # Integral image gives exact overlap for every candidate top-left in
+        # O(grid^2), without scanning Python objects for every placed macro.
+        occupied = self._occupied.astype(np.int32, copy=False)
+        prefix = np.pad(occupied, ((1, 0), (1, 0))).cumsum(0).cumsum(1)
+        sums = (
+            prefix[size_x:, size_y:]
+            - prefix[:-size_x, size_y:]
+            - prefix[size_x:, :-size_y]
+            + prefix[:-size_x, :-size_y]
+        )
+        mask[:self.grid - size_x + 1, :self.grid - size_y + 1] = (sums > 0)
 
         # Mark positions that would go out of bounds and core area block
         block = self.args.core_area_block

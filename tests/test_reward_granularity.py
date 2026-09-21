@@ -103,6 +103,14 @@ class RewardGranularityTest(unittest.TestCase):
         self.assertGreaterEqual(cache_size, 1)
         self.assertEqual(len(env._static_mask_cache), cache_size)
 
+    def test_position_mask_marks_overlap_after_placement(self):
+        env = make_env("step")
+        env.reset()
+        env.step(5 * env.grid + 5)
+        mask = env.get_position_mask(1)
+        self.assertEqual(mask[5, 5], 1)
+        self.assertEqual(mask[0, 0], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
