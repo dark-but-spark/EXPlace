@@ -22,6 +22,17 @@ class PerformanceDefaultsTest(unittest.TestCase):
         self.assertTrue(config["vectorized_occupancy"])
         self.assertTrue(config["batch_device_copy"])
 
+    def test_long_optimization_config_enables_performance_paths(self):
+        with (ROOT / "config" / "optimization_long.yaml").open() as handle:
+            config = yaml.safe_load(handle)
+        self.assertGreaterEqual(config["episode"], 100)
+        self.assertTrue(config["compact_transition"])
+        self.assertTrue(config["worker_rollout"])
+        self.assertTrue(config["mask_cache"])
+        self.assertTrue(config["vectorized_occupancy"])
+        self.assertTrue(config["batch_device_copy"])
+        self.assertFalse(config["use_dmp_for_evaluation"])
+
 
 if __name__ == "__main__":
     unittest.main()

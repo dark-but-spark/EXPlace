@@ -51,6 +51,18 @@ def process_args():
     parser.add_argument('--reward-weight-mode', choices=['fixed', 'ppa_correlation'], help='Override reward weight experiment mode')
     parser.add_argument('--reward-granularity', choices=['step', 'global'], help='Override step-wise or terminal global reward')
     parser.add_argument('--log-dir', type=str, help='Override the root directory for run outputs')
+    # BooleanOptionalAction provides paired --foo/--no-foo switches for
+    # reproducible performance ablations without editing YAML files.
+    for option in (
+        'compact_transition', 'worker_rollout', 'mixed_precision',
+        'async_evaluation', 'mask_cache', 'vectorized_occupancy',
+        'batch_device_copy',
+    ):
+        parser.add_argument(
+            f'--{option.replace("_", "-")}',
+            action=argparse.BooleanOptionalAction,
+            default=None,
+        )
     cmd_args = parser.parse_args()
     
     # Load config from YAML file
@@ -80,6 +92,14 @@ def process_args():
         config_dict['reward_granularity'] = cmd_args.reward_granularity
     if cmd_args.log_dir is not None:
         config_dict['log_dir'] = cmd_args.log_dir
+    for option in (
+        'compact_transition', 'worker_rollout', 'mixed_precision',
+        'async_evaluation', 'mask_cache', 'vectorized_occupancy',
+        'batch_device_copy',
+    ):
+        value = getattr(cmd_args, option)
+        if value is not None:
+            config_dict[option] = value
 
     # New experiment options are opt-in so historical configs keep their behavior.
     config_dict.setdefault('reward_weight_mode', 'fixed')

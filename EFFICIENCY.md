@@ -34,6 +34,11 @@ The main optimized paths have positive A/B switches. `mask_cache`,
 options. The same convention is used by `compact_transition`,
 `worker_rollout`, `mixed_precision`, and `async_evaluation`.
 
+For reproducible measurements, use `script/run_optimization_long.sh`. It
+creates matched baseline/ablation/optimized runs and writes `speedups.csv`
+with wall, rollout, and PPO ratios. Use `config/optimization_physical_long`
+with variants `async_off async_on` for the physical-evaluation comparison.
+
 - Physical evaluation is initialized only when a configured code path uses it.
 - Best-reward DREAMPlace evaluation and visualization can be disabled for RL
   ablations while their historical defaults remain enabled.

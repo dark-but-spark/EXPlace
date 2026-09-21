@@ -165,3 +165,22 @@
   `baseline_time / optimized_time` using identical seeds and workloads.
 - Compatibility: existing configs receive the optimized defaults through
   `process_args`; `compare_quick.yaml` records the three values explicitly.
+
+## Phase 12: reproducible long-run speedup harness
+
+- Change: add `config/optimization_long.yaml` (600 episodes, 10 parallel
+  environments) and `script/run_optimization_long.sh`. The script runs
+  baseline, one-factor ablations, all optimizations, and BF16 AMP with the
+  same benchmark/seed matrix.
+- Measurement: each task stores the exact command, stdout, wall duration, and
+  `runtime.csv` means. `speedups.csv` reports `baseline_time / variant_time`
+  for wall, rollout, and PPO time. No multiplier is recorded until the run
+  succeeds; missing runtime data is written as zero and should be treated as
+  an invalid measurement.
+- Physical evaluation: `config/optimization_physical_long.yaml` enables
+  DREAMPlace/OpenTimer. Run only `async_off` and `async_on` with that config
+  to isolate asynchronous evaluation; the default long run keeps physical
+  evaluation off to avoid mixing design-signoff cost into RL throughput.
+- Verification: shell syntax, dry-run command generation, Python syntax, and
+  the full unit suite pass locally. Actual long-run timings require a host
+  where CUDA devices and Ray GCS socket binding are available.
