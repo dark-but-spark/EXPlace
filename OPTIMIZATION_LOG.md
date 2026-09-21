@@ -130,3 +130,10 @@
   stepping path. The CPU comparison config enables worker rollouts explicitly.
 - Verification: syntax and unit tests cover configuration/defaults; a live
   Ray benchmark is still required for transport and wall-clock measurements.
+
+### Smoke evidence (2026-09-21)
+
+- `compare_quick` loaded the cached `superblue18` environment successfully but
+  failed before worker creation with Ray's `Timed out waiting for file
+  /tmp/ray/.../gcs_server_port_*`. This is an infrastructure failure; no
+  rollout-path timing is claimed from this run.
