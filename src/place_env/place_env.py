@@ -129,6 +129,80 @@ class PlaceEnv():
         self.trade_off_coeff = dict(zip(mask_names, weights))
         self.state_parsing.set_reward_weights(weights)
 
+    def compact_snapshot(self):
+        """Serialize only placement metadata needed to rebuild an observation."""
+        return {
+            "place_idx": int(self.place_idx),
+            "macro_to_place": tuple(self.macro_to_place),
+            "macro_pos": tuple(
+                (macro, tuple(self.macro_pos[macro])) for macro in self.macro_placed
+            ),
+            "reward_max": tuple(sorted(self.reward_max.items())),
+            "reward_min": tuple(sorted(self.reward_min.items())),
+            "corner_flag": bool(self.corner_flag),
+        }
+
+    def rebuild_state(self, snapshot):
+        """Rebuild the full policy observation from a compact snapshot."""
+        self.place_idx = int(snapshot["place_idx"])
+        self.macro_to_place = list(snapshot["macro_to_place"])
+        self.macro_pos = self.macro_pos_prototype.copy()
+        self.macro_placed = [macro for macro, _ in snapshot["macro_pos"]]
+        for macro, placement in snapshot["macro_pos"]:
+            self.macro_pos[macro] = tuple(placement)
+        self.reward_max = dict(snapshot["reward_max"])
+        self.reward_min = dict(snapshot["reward_min"])
+        self.corner_flag = bool(snapshot["corner_flag"])
+        self.canvas = np.zeros((self.grid, self.grid))
+        if self.args.regulator_flag:
+            self.prototype_canvas = np.zeros((self.grid, self.grid))
+            for macro in self.macro_to_place:
+                px, py, psx, psy = self.macro_pos_prototype[macro]
+                self.prototype_canvas = self.__draw_canvas(
+                    self.prototype_canvas, px, py, psx, psy
+                )
+        else:
+            self.prototype_canvas = None
+        self._occupied.fill(False)
+        for macro in self.macro_placed:
+            x, y, sx, sy = self.macro_pos[macro]
+            self.canvas = self.__draw_canvas(self.canvas, x, y, sx, sy)
+            self._occupied[x:x + sx, y:y + sy] = True
+        self.reset_net_to_macro()
+        for macro in self.macro_placed:
+            x, y, sx, sy = self.macro_pos[macro]
+            for net_name in self.node_to_net_dict.get(macro, []):
+                if net_name in self.net_to_macro:
+                    pin_x = round((x * self.ratio_x + self.node_info[macro]['x']/2 +
+                                   self.net_info[net_name]['nodes'][macro]['x_offset']) / self.ratio_x)
+                    pin_y = round((y * self.ratio_y + self.node_info[macro]['y']/2 +
+                                   self.net_info[net_name]['nodes'][macro]['y_offset']) / self.ratio_y)
+                    self.net_to_macro[net_name][macro] = (pin_x, pin_y)
+        if self.place_idx >= len(self.macro_to_place):
+            return np.zeros(1, dtype=np.float32)
+        macro = self.macro_to_place[self.place_idx]
+        self.masks = {name: (np.zeros((self.grid, self.grid)) if name in ('df', 'hier')
+                             else self._get_static_mask(name, macro) if name in ('reg', 'port', 'displacement')
+                             else self.mask_functions[name](macro))
+                      for name in self.args.used_masks}
+        has_next = self.place_idx + 1 < len(self.macro_to_place)
+        next_macro = self.macro_to_place[self.place_idx + 1] if has_next else None
+        self.next_masks_norm = {
+            name: (np.zeros((self.grid, self.grid)) if not has_next or name in ('df', 'hier')
+                   else self._get_static_mask(name, next_macro) if name in ('reg', 'port', 'displacement')
+                   else self.mask_functions[name](next_macro))
+            for name in self.args.used_masks
+        }
+        for name in self.args.used_masks:
+            if name == 'pos':
+                self.masks_norm[name] = self.masks[name]
+            else:
+                self.masks_norm[name], self.next_masks_norm[name] = self.__mask_normalization(self.masks[name], self.next_masks_norm[name])
+        _, _, sx, sy = self.macro_pos[macro]
+        self.state = self.state_parsing.get_state(self.place_idx, self.canvas, self.masks_norm,
+                                                   self.next_masks_norm, sx, sy, self.prototype_canvas if hasattr(self, 'prototype_canvas') else None)
+        return self.state.copy()
+
     def reset(self, reward_scaling_flag=False, corner_flag=False, visualize_flag=False):
         self.place_idx = 0
         self.macro_to_place.clear()

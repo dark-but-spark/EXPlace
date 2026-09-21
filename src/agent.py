@@ -43,8 +43,13 @@ class PPOAgent():
         self.training_step = 0
 
         self.training = False
+        self.state_rebuilder = None
         self.mixed_precision = bool(getattr(args, 'mixed_precision', False)) and self.args.device != 'cpu'
         self.amp_dtype = getattr(th, getattr(args, 'amp_dtype', 'float16'), th.float16)
+
+    def set_state_rebuilder(self, rebuilder):
+        """Set the environment callback used to materialize compact states."""
+        self.state_rebuilder = rebuilder
     
     def select_action(self, state:np.array):
         """
@@ -81,9 +86,15 @@ class PPOAgent():
             # Keep rollout observations in compact host memory.  Conversion to
             # float32 happens once per PPO update, immediately before device
             # transfer, preserving the actor's historical numerical path.
-            state = th.from_numpy(np.concatenate(
-                [np.asarray(t.state, dtype=np.float16) for t in self.buffer], axis=0
-            )).float().to(self.args.device)
+            if isinstance(self.buffer[0].state, dict):
+                if self.state_rebuilder is None:
+                    raise RuntimeError("compact transitions require a state rebuilder")
+                states = [self.state_rebuilder(t.state) for t in self.buffer]
+                state = th.from_numpy(np.concatenate(states, axis=0)).float().to(self.args.device)
+            else:
+                state = th.from_numpy(np.concatenate(
+                    [np.asarray(t.state, dtype=np.float16) for t in self.buffer], axis=0
+                )).float().to(self.args.device)
             action = th.tensor(np.array([t.action for t in self.buffer]), dtype=th.float, device=self.args.device).view(-1, 1)
             reward = th.stack([t.reward for t in self.buffer]).view(-1, 1).to(self.args.device)
             # reward = th.tensor(np.array([t.reward for t in self.buffer]), dtype=th.float).view(-1, 1).to(self.args.device)

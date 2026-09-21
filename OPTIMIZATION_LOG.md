@@ -84,3 +84,24 @@
 - The safe implementation target is a single Ray evaluator actor owning an
   isolated `ProblemInstance`, with at most one in-flight deep-copied placement;
   results must be consumed without changing the training episode counter.
+
+## Phase 7: compact environment snapshot API
+
+- Change: `PlaceEnv.compact_snapshot()` stores placement metadata, macro order,
+  and reward-scaling bounds; `rebuild_state()` reconstructs the full policy
+  observation on demand.
+- Verification: a two-macro environment test compares the rebuilt observation
+  against the live state element-wise.
+- Integration note: PPO/Ray transition wiring remains separate until the
+  snapshot path is validated on dynamic wire/dataflow cases.
+
+## Phase 8: compact transition integration
+
+- Change: compact transitions are enabled by default. Ray reset/step helpers
+  return a snapshot alongside the policy observation; PPO stores snapshots and
+  materializes the full state through the driver environment only at update
+  time.
+- Compatibility: `compact_transition: false` retains the previous FP16 state
+  buffer path.
+- Verification: snapshot reconstruction is element-wise equivalent in the
+  environment test; full Ray training still requires a functioning Ray runtime.

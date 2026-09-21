@@ -91,6 +91,7 @@ def process_args():
     config_dict.setdefault('visualize_prototype', False)
     config_dict.setdefault('mixed_precision', False)
     config_dict.setdefault('amp_dtype', 'float16')
+    config_dict.setdefault('compact_transition', True)
     if config_dict['amp_dtype'] not in ('float16', 'bfloat16'):
         raise ValueError("amp_dtype must be 'float16' or 'bfloat16'")
     if not config_dict.get('used_masks') or config_dict['used_masks'][-1] != 'pos':
@@ -182,6 +183,8 @@ def main(args, config_path):
 
     # Initialize environment and agent
     agent = PPOAgent(args=args)
+    if getattr(args, 'compact_transition', False):
+        agent.set_state_rebuilder(test_env.rebuild_state)
     agent.train()
     seed_torch(args.seed)
     reward_weight_learner = build_reward_weight_learner(args)
@@ -361,7 +364,16 @@ def run(ray_envs, agent, args, reward_scaling_flag=False, store_transitions=True
     """
     # Reset all environments in parallel
     visualize_flag = getattr(args, 'visualize_flag', False)
-    states = ray.get([env.reset.remote(reward_scaling_flag, args.corner_flag, visualize_flag) for env in ray_envs])
+    if getattr(args, 'compact_transition', False):
+        reset_results = ray.get([
+            env.reset_compact.remote(reward_scaling_flag, args.corner_flag, visualize_flag)
+            for env in ray_envs
+        ])
+        states, snapshots = zip(*reset_results)
+        states, snapshots = list(states), list(snapshots)
+    else:
+        states = ray.get([env.reset.remote(reward_scaling_flag, args.corner_flag, visualize_flag) for env in ray_envs])
+        snapshots = [None] * args.rollout_batch_size
     dones = False
     episode_infos = [None] * args.rollout_batch_size
     episode_rewards = [float('-inf')] * args.rollout_batch_size
@@ -380,8 +392,14 @@ def run(ray_envs, agent, args, reward_scaling_flag=False, store_transitions=True
         # Agent selects actions
         actions, action_log_probs = agent.select_action(batch_state)
         # Step all environments in parallel
-        results = ray.get([env.step.remote(a) for env, a in zip(ray_envs, actions)])
-        next_states, rewards, dones_list, infos = zip(*results)
+        if getattr(args, 'compact_transition', False):
+            results = ray.get([env.step_compact.remote(a) for env, a in zip(ray_envs, actions)])
+            next_states, rewards, dones_list, infos, next_snapshots = zip(*results)
+            next_snapshots = list(next_snapshots)
+        else:
+            results = ray.get([env.step.remote(a) for env, a in zip(ray_envs, actions)])
+            next_states, rewards, dones_list, infos = zip(*results)
+            next_snapshots = [None] * args.rollout_batch_size
         
         # Collect transitions for each environment (don't store yet)
         for idx in range(args.rollout_batch_size):
@@ -390,7 +408,8 @@ def run(ray_envs, agent, args, reward_scaling_flag=False, store_transitions=True
                     # Store half precision on the host; PPO widens once when
                     # assembling the update tensor.  This removes the large
                     # float32 transition footprint without changing inference.
-                    state=states[idx].astype(np.float16, copy=True),
+                    state=snapshots[idx] if getattr(args, 'compact_transition', False)
+                    else states[idx].astype(np.float16, copy=True),
                     action=actions[idx],
                     reward=th.tensor(rewards[idx]) / 200.0,
                     action_log_prob=action_log_probs[idx],
@@ -403,6 +422,7 @@ def run(ray_envs, agent, args, reward_scaling_flag=False, store_transitions=True
                 episode_rewards[idx] = infos[idx].get('scaled_reward', float('-inf'))
         
         states = next_states
+        snapshots = next_snapshots
         dones = dones_list[0]
     
     # Scaling warm-up episodes calibrate min/max only and must not displace the

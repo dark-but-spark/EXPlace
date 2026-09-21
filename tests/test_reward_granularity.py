@@ -111,6 +111,17 @@ class RewardGranularityTest(unittest.TestCase):
         self.assertEqual(mask[5, 5], 1)
         self.assertEqual(mask[0, 0], 0)
 
+    def test_compact_snapshot_rebuilds_observation(self):
+        env = make_env("step")
+        original = env.reset()
+        env.step(5 * env.grid + 5)
+        snapshot = env.compact_snapshot()
+        expected = env.state.copy()
+        rebuilt = make_env("step")
+        rebuilt.reset()
+        actual = rebuilt.rebuild_state(snapshot)
+        np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-6)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -299,8 +299,14 @@ def init_ray_envs(args, num_envs, problem):
             
         def reset(self, reward_scaling_flag=False, corner_flag=False, visualize_flag=False):
             return self.env.reset(reward_scaling_flag, corner_flag, visualize_flag)
+        def reset_compact(self, reward_scaling_flag=False, corner_flag=False, visualize_flag=False):
+            state = self.env.reset(reward_scaling_flag, corner_flag, visualize_flag)
+            return state, self.env.compact_snapshot()
         def step(self, action):
             return self.env.step(action)
+        def step_compact(self, action):
+            state, reward, done, info = self.env.step(action)
+            return state, reward, done, info, self.env.compact_snapshot()
         def step_many(self, actions):
             """Execute a contiguous action chunk in the worker.
 
