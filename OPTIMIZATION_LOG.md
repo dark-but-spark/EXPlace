@@ -105,3 +105,17 @@
   buffer path.
 - Verification: snapshot reconstruction is element-wise equivalent in the
   environment test; full Ray training still requires a functioning Ray runtime.
+
+## Phase 9: isolated asynchronous physical evaluation
+
+- Change: add a single Ray `AsyncPhysicalEvaluator` actor that owns an isolated
+  CPU `ProblemInstance`/OpenTimer state. The training loop submits at most one
+  deep-copied placement and polls it without blocking while later rollout/PPO
+  work proceeds.
+- Result handling preserves periodic best-TNS/best-GP-HPWL artifacts and
+  adaptive reward updates. Optional best-reward evaluation is also submitted
+  to the same bounded actor queue.
+- Compatibility: `async_evaluation: false` retains the synchronous evaluation
+  path. The default is true when physical evaluation is enabled.
+- Verification: syntax and unit tests run locally; end-to-end timing remains
+  pending because the container's Ray GCS startup is unavailable.

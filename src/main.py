@@ -28,6 +28,7 @@ from agent import PPOAgent
 from env_utils import init_ray_envs, create_single_env
 from experiments.adaptive_reward import build_reward_weight_learner
 from problem_instance import ProblemInstance
+from async_evaluator import AsyncPhysicalEvaluator
 from utils.log_utils import save_runtime, save_best_metrics, save_eval_metrics, save_reward_weights
 
 CONFIG_DIR = os.path.join(ROOT_DIR, "config")
@@ -92,6 +93,7 @@ def process_args():
     config_dict.setdefault('mixed_precision', False)
     config_dict.setdefault('amp_dtype', 'float16')
     config_dict.setdefault('compact_transition', True)
+    config_dict.setdefault('async_evaluation', True)
     if config_dict['amp_dtype'] not in ('float16', 'bfloat16'):
         raise ValueError("amp_dtype must be 'float16' or 'bfloat16'")
     if not config_dict.get('used_masks') or config_dict['used_masks'][-1] != 'pos':
@@ -220,6 +222,73 @@ def main(args, config_path):
     best_gp_hpwl = float('inf')  # lower is better
     best_metrics_path = os.path.join(args.log_dir, 'best_metrics.csv')
     runtime_path = os.path.join(args.log_dir, 'runtime.csv')
+    async_evaluator = (
+        AsyncPhysicalEvaluator.remote(args, args.design_name)
+        if args.use_dmp_for_evaluation and getattr(args, 'async_evaluation', True)
+        else None
+    )
+    pending_eval = None
+    pending_context = None
+    last_metrics = (0.0, 0.0, 0.0)
+
+    def consume_async_eval(block=False):
+        nonlocal pending_eval, pending_context, last_metrics, best_tns, best_gp_hpwl
+        if pending_eval is None:
+            return False
+        ready, _ = ray.wait(
+            [pending_eval], timeout=None if block else 0
+        )
+        if not ready:
+            return False
+        result = ray.get(ready[0])
+        context = pending_context
+        pending_eval = None
+        pending_context = None
+        gp_hpwl, tns, wns = result['metrics']
+        last_metrics = (gp_hpwl, tns, wns)
+        eval_episode = result['episode']
+        trajectory = context['trajectory']
+        if context.get('kind') == 'best_reward':
+            ray.get(async_evaluator.save_placement.remote(os.path.join(args.placement_dir, 'best_reward.def')))
+            ray.get(async_evaluator.plot.remote(gp_hpwl, os.path.join(args.visualization_dir, 'best_reward.png')))
+            return True
+        if args.use_timer_for_evaluation and tns > best_tns:
+            best_tns = tns
+            th.save(trajectory['macro_pos'], os.path.join(args.placement_dir, 'best_tns_macro_pos.pt'))
+            ray.get(async_evaluator.save_placement.remote(os.path.join(args.placement_dir, 'best_tns.def')))
+            ray.get(async_evaluator.plot.remote(gp_hpwl, os.path.join(args.visualization_dir, 'best_tns.png')))
+            agent.save_model(episode=eval_episode, path=args.model_dir, filename='best_tns_model.pt')
+            save_best_metrics(best_metrics_path, eval_episode, 'tns', tns, gp_hpwl, wns,
+                              context['reward_info'], context['actor_loss'], context['critic_loss'])
+            print(f"Best TNS updated - TNS: {tns}, WNS: {wns}, GP-HPWL: {gp_hpwl}")
+        if gp_hpwl < best_gp_hpwl:
+            best_gp_hpwl = gp_hpwl
+            th.save(trajectory['macro_pos'], os.path.join(args.placement_dir, 'best_gp_hpwl_macro_pos.pt'))
+            ray.get(async_evaluator.save_placement.remote(os.path.join(args.placement_dir, 'best_gp_hpwl.def')))
+            ray.get(async_evaluator.plot.remote(gp_hpwl, os.path.join(args.visualization_dir, 'best_gp_hpwl.png')))
+            agent.save_model(episode=eval_episode, path=args.model_dir, filename='best_gp_hpwl_model.pt')
+            save_best_metrics(best_metrics_path, eval_episode, 'gp_hpwl', tns, gp_hpwl, wns,
+                              context['reward_info'], context['actor_loss'], context['critic_loss'])
+            print(f"Best GP-HPWL updated - GP-HPWL: {gp_hpwl}, TNS: {tns}, WNS: {wns}")
+        agent.train()
+        if reward_weight_learner is not None:
+            weight_update = reward_weight_learner.observe(
+                trajectory, gp_hpwl=gp_hpwl, tns=tns, wns=wns
+            )
+            new_weights = [weight_update.weights[name] for name in args.used_masks[:-1]]
+            sync_reward_weights(args, agent, test_env, ray_envs, new_weights)
+            if not args.debug:
+                save_reward_weights(
+                    reward_weights_path, episode=eval_episode,
+                    weights=weight_update.weights,
+                    ppa_penalty=weight_update.ppa_penalty,
+                    correlations=weight_update.correlations,
+                    updated=weight_update.updated,
+                )
+            for name, value in weight_update.weights.items():
+                writer.add_scalar(f'reward_weight/{name}', value, eval_episode)
+            print(f"Adaptive reward weights: {weight_update.weights}")
+        return True
 
     for batch_idx in range(1, num_batches + 1):
         episode_counter += args.rollout_batch_size
@@ -234,51 +303,43 @@ def main(args, config_path):
         if episode_counter % 10 == 0 and not args.debug:
             save_runtime(runtime_path, episode_counter, t_rollout, t_train)
 
-        # Evaluate with DMP periodically
-        gp_hpwl, tns, wns = 0., 0., 0.
-        if episode_counter % args.evaluation_interval == 0:
-            if args.use_dmp_for_evaluation:
+        # Consume at most one completed physical evaluation without blocking.
+        consume_async_eval()
+        gp_hpwl, tns, wns = last_metrics
+        if episode_counter % args.evaluation_interval == 0 and args.use_dmp_for_evaluation:
+            if async_evaluator is not None:
+                if pending_eval is None:
+                    trajectory = inference(args, model_path=None, agent=agent, test_env=test_env)
+                    pending_context = {
+                        'trajectory': trajectory,
+                        'reward_info': reward_info,
+                        'actor_loss': actor_loss,
+                        'critic_loss': critic_loss,
+                        'kind': 'periodic',
+                    }
+                    pending_eval = async_evaluator.evaluate.remote(
+                        episode_counter, trajectory['macro_pos']
+                    )
+                    print(f"Submitted asynchronous physical evaluation for episode {episode_counter}")
+                else:
+                    print("Physical evaluation pending; skipping stale submission")
+            else:
                 trajectory = inference(args, model_path=None, agent=agent, test_env=test_env)
                 gp_hpwl, tns, wns = test_problem.evaluate(trajectory['macro_pos'])
+                last_metrics = (gp_hpwl, tns, wns)
                 if args.use_timer_for_evaluation and tns > best_tns:
                     best_tns = tns
                     th.save(trajectory['macro_pos'], os.path.join(args.placement_dir, 'best_tns_macro_pos.pt'))
                     test_problem.save_placement(os.path.join(args.placement_dir, 'best_tns.def'))
                     test_problem.plot(gp_hpwl, os.path.join(args.visualization_dir, 'best_tns.png'))
                     agent.save_model(episode=episode_counter, path=args.model_dir, filename='best_tns_model.pt')
-                    save_best_metrics(best_metrics_path, episode_counter, 'tns', tns, gp_hpwl, wns, reward_info, actor_loss, critic_loss)
-                    print(f"Best TNS updated - TNS: {tns}, WNS: {wns}, GP-HPWL: {gp_hpwl}")
-                # Update best GP-HPWL (lower is better): save macro_pos, .def, .png and model
                 if gp_hpwl < best_gp_hpwl:
                     best_gp_hpwl = gp_hpwl
                     th.save(trajectory['macro_pos'], os.path.join(args.placement_dir, 'best_gp_hpwl_macro_pos.pt'))
                     test_problem.save_placement(os.path.join(args.placement_dir, 'best_gp_hpwl.def'))
                     test_problem.plot(gp_hpwl, os.path.join(args.visualization_dir, 'best_gp_hpwl.png'))
                     agent.save_model(episode=episode_counter, path=args.model_dir, filename='best_gp_hpwl_model.pt')
-                    save_best_metrics(best_metrics_path, episode_counter, 'gp_hpwl', tns, gp_hpwl, wns, reward_info, actor_loss, critic_loss)
-                    print(f"Best GP-HPWL updated - GP-HPWL: {gp_hpwl}, TNS: {tns}, WNS: {wns}")
                 agent.train()
-                if reward_weight_learner is not None:
-                    weight_update = reward_weight_learner.observe(
-                        trajectory, gp_hpwl=gp_hpwl, tns=tns, wns=wns
-                    )
-                    new_weights = [
-                        weight_update.weights[name]
-                        for name in args.used_masks[:-1]
-                    ]
-                    sync_reward_weights(args, agent, test_env, ray_envs, new_weights)
-                    if not args.debug:
-                        save_reward_weights(
-                            reward_weights_path,
-                            episode=episode_counter,
-                            weights=weight_update.weights,
-                            ppa_penalty=weight_update.ppa_penalty,
-                            correlations=weight_update.correlations,
-                            updated=weight_update.updated,
-                        )
-                    for name, value in weight_update.weights.items():
-                        writer.add_scalar(f'reward_weight/{name}', value, episode_counter)
-                    print(f"Adaptive reward weights: {weight_update.weights}")
 
         if not args.debug:
             save_eval_metrics(
@@ -314,9 +375,19 @@ def main(args, config_path):
                 and not args.debug
                 and args.evaluate_best_reward_with_dmp
             ):
-                gp_hpwl, _, _ = test_problem.evaluate(macro_pos)
-                test_problem.save_placement(os.path.join(args.placement_dir, 'best_reward.def'))
-                test_problem.plot(gp_hpwl, os.path.join(args.visualization_dir, 'best_reward.png'))
+                if async_evaluator is not None and pending_eval is None:
+                    pending_context = {
+                        'trajectory': reward_info.copy(),
+                        'reward_info': reward_info,
+                        'actor_loss': actor_loss,
+                        'critic_loss': critic_loss,
+                        'kind': 'best_reward',
+                    }
+                    pending_eval = async_evaluator.evaluate.remote(episode_counter, macro_pos)
+                elif async_evaluator is None:
+                    gp_hpwl, _, _ = test_problem.evaluate(macro_pos)
+                    test_problem.save_placement(os.path.join(args.placement_dir, 'best_reward.def'))
+                    test_problem.plot(gp_hpwl, os.path.join(args.visualization_dir, 'best_reward.png'))
 
         # Current time step model checkpoint (single file, overwrite each batch)
         if not args.debug:
@@ -340,6 +411,10 @@ def main(args, config_path):
         print(f"Best scaled_reward: {best_reward}")
         print(f"Best episode info: {best_info_no_macro}")
 
+    if async_evaluator is not None:
+        if pending_eval is not None:
+            consume_async_eval(block=True)
+        ray.kill(async_evaluator)
     # Total runtime
     print(f"Training completed. Time: {time.time() - t_0:.2f}s")
     writer.close()  # Close TensorBoard writer
