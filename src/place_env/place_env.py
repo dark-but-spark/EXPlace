@@ -102,6 +102,10 @@ class PlaceEnv():
             'pos': self.get_position_mask,
             'reg': self.get_regularity_mask
         }
+        # These masks depend only on the macro geometry and static floorplan
+        # metadata. Cache them once per environment; dynamic masks (wire/dataflow
+        # / hierarchy / position) remain computed from the current placement.
+        self._static_mask_cache = {}
         
         # trade-off parameters dict
         self.trade_off_coeff = {mask_name: args.trade_off_coeff[i] for i, mask_name in enumerate(args.used_masks[:-1])} # last one is position mask
@@ -132,6 +136,7 @@ class PlaceEnv():
 
         self.reward_scaling_flag = reward_scaling_flag
         self.macro_pos = self.macro_pos_prototype.copy()
+        self._static_mask_cache.clear()
         self.macro_placed = []
 
         if corner_flag:
@@ -162,6 +167,8 @@ class PlaceEnv():
         for mask_name in self.args.used_masks:
             if mask_name == 'df' or mask_name == 'hier':
                 self.masks[mask_name] = np.zeros((self.grid, self.grid))
+            elif mask_name in ('reg', 'port', 'displacement'):
+                self.masks[mask_name] = self._get_static_mask(mask_name, first_macro)
             else:
                 self.masks[mask_name] = self.mask_functions[mask_name](first_macro)
 
@@ -170,6 +177,8 @@ class PlaceEnv():
         for mask_name in self.args.used_masks:
             if mask_name == 'df' or mask_name == 'hier':
                 self.next_masks_norm[mask_name] = np.zeros((self.grid, self.grid))
+            elif mask_name in ('reg', 'port', 'displacement'):
+                self.next_masks_norm[mask_name] = self._get_static_mask(mask_name, second_macro)
             else:
                 self.next_masks_norm[mask_name] = self.mask_functions[mask_name](second_macro)
 
@@ -287,12 +296,18 @@ class PlaceEnv():
         if self.place_idx < len(self.macro_to_place):
             next_macro = self.macro_to_place[self.place_idx]
             for mask_name in self.args.used_masks:
-                self.masks[mask_name] = self.mask_functions[mask_name](next_macro)
+                if mask_name in ('reg', 'port', 'displacement'):
+                    self.masks[mask_name] = self._get_static_mask(mask_name, next_macro)
+                else:
+                    self.masks[mask_name] = self.mask_functions[mask_name](next_macro)
 
         if self.place_idx < len(self.macro_to_place) - 1:
             next_next_macro = self.macro_to_place[self.place_idx + 1]
             for mask_name in self.args.used_masks:
-                self.next_masks_norm[mask_name] = self.mask_functions[mask_name](next_next_macro)
+                if mask_name in ('reg', 'port', 'displacement'):
+                    self.next_masks_norm[mask_name] = self._get_static_mask(mask_name, next_next_macro)
+                else:
+                    self.next_masks_norm[mask_name] = self.mask_functions[mask_name](next_next_macro)
 
         # episode ends
         done = False
@@ -571,6 +586,12 @@ class PlaceEnv():
         mask[:, :block] = 1
         
         return mask
+
+    def _get_static_mask(self, mask_name, macro_to_place):
+        key = (mask_name, macro_to_place)
+        if key not in self._static_mask_cache:
+            self._static_mask_cache[key] = self.mask_functions[mask_name](macro_to_place)
+        return self._static_mask_cache[key].copy()
     
     def get_regularity_mask(self, macro_to_place):
         x, y, size_x, size_y = self.macro_pos_prototype[macro_to_place]

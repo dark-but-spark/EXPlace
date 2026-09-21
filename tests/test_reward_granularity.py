@@ -92,6 +92,17 @@ class RewardGranularityTest(unittest.TestCase):
         self.assertEqual(compact.nbytes, state.nbytes // 2)
         np.testing.assert_allclose(compact.astype(np.float32), state, rtol=1e-3, atol=1e-3)
 
+    def test_static_masks_are_cached_without_aliasing(self):
+        env = make_env("step")
+        env.reset()
+        first = env._get_static_mask("displacement", 0)
+        first[0, 0] = 123.0
+        second = env._get_static_mask("displacement", 0)
+        self.assertNotEqual(second[0, 0], 123.0)
+        cache_size = len(env._static_mask_cache)
+        self.assertGreaterEqual(cache_size, 1)
+        self.assertEqual(len(env._static_mask_cache), cache_size)
+
 
 if __name__ == "__main__":
     unittest.main()

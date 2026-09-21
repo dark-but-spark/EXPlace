@@ -38,3 +38,13 @@
 - Compatibility: model inputs and loss calculations are unchanged.
 - Verification: the full unit suite and a CPU update smoke test must pass before
   this phase is considered complete; GPU transfer timing requires a CUDA node.
+
+## Phase 3: static mask caching
+
+- Change: masks depending only on macro geometry and static floorplan metadata
+  (`reg`, `port`, `displacement`) are cached per macro and reused across reset
+  and step look-ahead construction. Cached arrays are copied on access to avoid
+  accidental mutation by normalization.
+- Verification: the environment test checks cache reuse and no aliasing.
+- Scope: dynamic `wire`, `df`, `hier`, and `pos` masks remain placement-dependent
+  and are not cached.
