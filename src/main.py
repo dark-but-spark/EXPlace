@@ -93,6 +93,7 @@ def process_args():
     config_dict.setdefault('mixed_precision', False)
     config_dict.setdefault('amp_dtype', 'float16')
     config_dict.setdefault('compact_transition', True)
+    config_dict.setdefault('worker_rollout', True)
     config_dict.setdefault('async_evaluation', True)
     if config_dict['amp_dtype'] not in ('float16', 'bfloat16'):
         raise ValueError("amp_dtype must be 'float16' or 'bfloat16'")
@@ -437,6 +438,12 @@ def run(ray_envs, agent, args, reward_scaling_flag=False, store_transitions=True
     Returns:
         reward_info: dict, info for this episode (best total_reward among all envs), with 'batch_best_idx' field
     """
+    if getattr(args, 'worker_rollout', False):
+        return run_worker_rollouts(
+            ray_envs, agent, args,
+            reward_scaling_flag=reward_scaling_flag,
+            store_transitions=store_transitions,
+        )
     # Reset all environments in parallel
     visualize_flag = getattr(args, 'visualize_flag', False)
     if getattr(args, 'compact_transition', False):
@@ -513,6 +520,47 @@ def run(ray_envs, agent, args, reward_scaling_flag=False, store_transitions=True
     if best_reward_info is not None:
         best_reward_info = best_reward_info.copy()
         best_reward_info['batch_best_idx'] = best_idx
+    return best_reward_info, episode_infos
+
+
+def run_worker_rollouts(ray_envs, agent, args, reward_scaling_flag=False,
+                        store_transitions=True):
+    """Run complete policy-controlled episodes inside Ray workers.
+
+    The driver transfers actor weights once per worker and receives one compact
+    rollout object, eliminating per-step Ray observation traffic.
+    """
+    actor_state = {
+        name: value.detach().cpu()
+        for name, value in agent.actor.state_dict().items()
+    }
+    requests = [
+        env.rollout.remote(
+            actor_state,
+            list(args.trade_off_coeff),
+            reward_scaling_flag,
+            args.corner_flag,
+            False,
+            getattr(args, 'compact_transition', True),
+        )
+        for env in ray_envs
+    ]
+    results = ray.get(requests)
+    episode_infos = [info for _, info in results]
+    episode_rewards = [info.get('scaled_reward', float('-inf')) for info in episode_infos]
+    if store_transitions:
+        for rollout, _ in results:
+            for state, action, reward, log_prob, done in rollout:
+                agent.store_transition(Transition(
+                    state=state,
+                    action=action,
+                    reward=th.tensor(reward) / 200.0,
+                    action_log_prob=log_prob,
+                    done=done,
+                ))
+    best_idx = int(np.argmax(episode_rewards))
+    best_reward_info = episode_infos[best_idx].copy()
+    best_reward_info['batch_best_idx'] = best_idx
     return best_reward_info, episode_infos
 
 def run_single_env(env, agent, args, reward_scaling_flag=False):

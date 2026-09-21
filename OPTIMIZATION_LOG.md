@@ -119,3 +119,14 @@
   path. The default is true when physical evaluation is enabled.
 - Verification: syntax and unit tests run locally; end-to-end timing remains
   pending because the container's Ray GCS startup is unavailable.
+
+## Phase 10: worker-side complete rollouts
+
+- Change: Ray workers now synchronize the actor weights once and execute a full
+  policy-controlled episode locally. They return one compact rollout object,
+  so the driver no longer transfers observations or invokes `step.remote()` per
+  macro.
+- Compatibility: `worker_rollout: false` uses the previous driver-controlled
+  stepping path. The CPU comparison config enables worker rollouts explicitly.
+- Verification: syntax and unit tests cover configuration/defaults; a live
+  Ray benchmark is still required for transport and wall-clock measurements.

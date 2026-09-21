@@ -296,6 +296,7 @@ def init_ray_envs(args, num_envs, problem):
             
             # Each worker creates its own environment but shares data
             self.env = PlaceEnv(args, env_params=env_params)
+            self.policy_agent = None
             
         def reset(self, reward_scaling_flag=False, corner_flag=False, visualize_flag=False):
             return self.env.reset(reward_scaling_flag, corner_flag, visualize_flag)
@@ -321,6 +322,27 @@ def init_ray_envs(args, num_envs, problem):
                 if result[2]:
                     break
             return results
+        def rollout(self, actor_state, reward_weights, reward_scaling_flag=False,
+                    corner_flag=False, visualize_flag=False, compact=True):
+            """Sync policy weights and execute one complete episode locally."""
+            from agent import PPOAgent
+            if self.policy_agent is None:
+                self.policy_agent = PPOAgent(args=self.env.args)
+            self.policy_agent.actor.load_state_dict(actor_state)
+            self.policy_agent.set_reward_weights(reward_weights)
+            self.policy_agent.train()
+            state = self.env.reset(reward_scaling_flag, corner_flag, visualize_flag)
+            rollout = []
+            done = False
+            while not done:
+                actions, log_probs = self.policy_agent.select_action(state)
+                action = actions[0]
+                log_prob = log_probs[0]
+                snapshot = self.env.compact_snapshot() if compact else state.astype(np.float16, copy=True)
+                next_state, reward, done, info = self.env.step(action)
+                rollout.append((snapshot, action, reward, log_prob, done))
+                state = next_state
+            return rollout, info
         def set_reward_weights(self, weights):
             return self.env.set_reward_weights(weights)
         def visualize_placement(self, i_episode):
