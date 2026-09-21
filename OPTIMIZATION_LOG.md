@@ -139,6 +139,10 @@
 - Verification: syntax and unit tests cover configuration/defaults; a live
   Ray benchmark is still required for transport and wall-clock measurements.
 
+- Protocol verification: the fake-worker test confirms one `rollout.remote`
+  call per worker and correct transition aggregation without requiring a Ray
+  cluster.
+
 ### Smoke evidence (2026-09-21)
 
 - `compare_quick` loaded the cached `superblue18` environment successfully but
