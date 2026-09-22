@@ -200,3 +200,21 @@
   approximately equal to or slower than baseline. Mask/vectorized and PPO
   component groups were slower in this workload. These results do not justify
   claiming a universal speedup.
+
+Concrete wall-time ratios against the same seed's baseline (successful tasks
+only) were:
+
+| Variant | Seed 3 | Seed 4 | Seed 5 | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| compact | 1.257x | 1.080x | 1.058x | stable wall improvement, 1.13x mean ratio |
+| worker | 1.329x | failed | 1.491x | promising, but only 2 valid seeds |
+| masks | 0.790x | failed | 0.862x | slower in this run |
+| PPO batch copy | 0.778x | failed | 0.850x | slower in this run |
+| all optimized | 0.908x | failed | 0.977x | no end-to-end speedup yet |
+
+The component means from nested `runtime.csv` files tell the same story:
+compact reduced rollout time from about 17.15 s to 11.60 s per logged batch,
+but increased PPO time from about 1.71 s to 5.13 s. The cumulative optimized
+variant had about 17.06 s rollout and 3.62 s PPO, so its total did not beat the
+baseline. These are 600-episode `superblue18` runs with 10 environments and no
+physical evaluation, not placement-quality results.
