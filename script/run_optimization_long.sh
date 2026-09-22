@@ -142,7 +142,9 @@ for variant in "${VARIANTS_ARRAY[@]}"; do
             fi
             end="$(date +%s)"
             duration=$((end - start))
-            runtime_file="${task_dir}/output/runtime.csv"
+            # main.py may append benchmark/timestamp directories below the
+            # requested log root; locate the single runtime file recursively.
+            runtime_file="$(find "${task_dir}" -type f -name runtime.csv -print -quit)"
             means="$(${PYTHON_BIN} - "${runtime_file}" <<'PY'
 import csv, sys
 rollout, ppo = [], []

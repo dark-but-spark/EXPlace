@@ -184,3 +184,19 @@
 - Verification: shell syntax, dry-run command generation, Python syntax, and
   the full unit suite pass locally. Actual long-run timings require a host
   where CUDA devices and Ray GCS socket binding are available.
+
+### First GPU long-run result (2026-09-21)
+
+- The 600-episode matrix completed 15/21 tasks. Seeds using GPU 1 failed with
+  CUDA out-of-memory, and all `amp_bf16` tasks failed because this PyTorch/CUDA
+  build does not implement `smooth_l1_backward_cuda` for BF16.
+- The first report incorrectly showed zero rollout/PPO means because the
+  script looked only at `output/runtime.csv`; `main.py` writes below a nested
+  `output/rl_logs/.../<timestamp>/` directory. The harness now searches
+  recursively. Wall durations remain valid; component means from that report
+  must be recomputed from the nested files.
+- Successful wall-time evidence is inconclusive for a full optimized matrix:
+  worker-only was faster on seeds 3/5, while the cumulative optimized path was
+  approximately equal to or slower than baseline. Mask/vectorized and PPO
+  component groups were slower in this workload. These results do not justify
+  claiming a universal speedup.
