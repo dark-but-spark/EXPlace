@@ -57,6 +57,19 @@ class PPOAgent():
     def set_state_rebuilder(self, rebuilder):
         """Set the environment callback used to materialize compact states."""
         self.state_rebuilder = rebuilder
+
+    def _build_state_batch(self):
+        """Materialize rollout observations without changing baseline dtype."""
+        if isinstance(self.buffer[0].state, dict):
+            if self.state_rebuilder is None:
+                raise RuntimeError("compact transitions require a state rebuilder")
+            states = [self.state_rebuilder(t.state) for t in self.buffer]
+            return th.from_numpy(np.concatenate(states, axis=0)).float()
+
+        state_dtype = np.float16 if getattr(self.args, 'compact_transition', True) else np.float32
+        return th.from_numpy(np.concatenate(
+            [np.asarray(t.state, dtype=state_dtype) for t in self.buffer], axis=0
+        )).float()
     
     def select_action(self, state:np.array):
         """
@@ -91,18 +104,10 @@ class PPOAgent():
         if self.counter % self.buffer_capacity == 0:
             t_start = time.time() #########
             stage_batch = getattr(self.args, 'batch_device_copy', True)
-            # Keep rollout observations in compact host memory.  Conversion to
-            # float32 happens once per PPO update, immediately before device
-            # transfer, preserving the actor's historical numerical path.
-            if isinstance(self.buffer[0].state, dict):
-                if self.state_rebuilder is None:
-                    raise RuntimeError("compact transitions require a state rebuilder")
-                states = [self.state_rebuilder(t.state) for t in self.buffer]
-                state = th.from_numpy(np.concatenate(states, axis=0)).float()
-            else:
-                state = th.from_numpy(np.concatenate(
-                    [np.asarray(t.state, dtype=np.float16) for t in self.buffer], axis=0
-                )).float()
+            # Compact snapshots are rebuilt on demand.  For the explicit
+            # non-compact baseline, preserve the original FP32 host buffer;
+            # otherwise this path would silently change the baseline.
+            state = self._build_state_batch()
             action = th.tensor(np.array([t.action for t in self.buffer]), dtype=th.float).view(-1, 1)
             reward = th.stack([t.reward for t in self.buffer]).view(-1, 1)
             # reward = th.tensor(np.array([t.reward for t in self.buffer]), dtype=th.float).view(-1, 1).to(self.args.device)
@@ -164,12 +169,16 @@ class PPOAgent():
                     with (th.autocast(device_type=batch_state.device.type, dtype=self.amp_dtype)
                           if self.mixed_precision else nullcontext()):
                         critic_output = self.critic(batch_state[:, :1])
-                    # CUDA BF16 has no smooth_l1 backward kernel in some
-                    # PyTorch builds. Keep the loss and advantage in FP32
-                    # while retaining autocast for the critic forward pass.
-                    critic_output_fp32 = critic_output.float()
-                    target_v_fp32 = target_v.float()
-                    advantage = (target_v_fp32 - critic_output_fp32).detach()
+                    # Keep the historical FP32 path untouched. Only the
+                    # opt-in BF16 AMP path needs a narrow loss fallback on
+                    # PyTorch builds without smooth_l1 BF16 backward.
+                    if self.mixed_precision and self.amp_dtype == th.bfloat16:
+                        critic_loss_output = critic_output.float()
+                        critic_loss_target = target_v.float()
+                    else:
+                        critic_loss_output = critic_output
+                        critic_loss_target = target_v
+                    advantage = (critic_loss_target - critic_loss_output).detach()
                     L1 = ratio * advantage.squeeze() 
                     L2 = th.clamp(ratio, 1-self.args.clip_param, 1+self.args.clip_param) * advantage.squeeze() 
                     action_loss = -th.min(L1, L2).mean() 
@@ -179,7 +188,9 @@ class PPOAgent():
                     nn.utils.clip_grad_norm_(self.actor.parameters(), self.args.max_grad_norm)
                     self.actor_opt.step()
 
-                    value_loss = nn.functional.smooth_l1_loss(critic_output_fp32, target_v_fp32)
+                    value_loss = nn.functional.smooth_l1_loss(
+                        critic_loss_output, critic_loss_target
+                    )
                     self.critic_opt.zero_grad()
                     value_loss.backward()
                     nn.utils.clip_grad_norm_(self.critic.parameters(), self.args.max_grad_norm)

@@ -345,7 +345,10 @@ def init_ray_envs(args, num_envs, problem):
                 actions, log_probs = self.policy_agent.select_action(state)
                 action = actions[0]
                 log_prob = log_probs[0]
-                snapshot = self.env.compact_snapshot() if compact else state.astype(np.float16, copy=True)
+                # ``compact=False`` is the unchanged baseline protocol: keep
+                # the complete FP32 observation instead of applying the
+                # compact-transition optimization implicitly.
+                snapshot = self.env.compact_snapshot() if compact else state.astype(np.float32, copy=True)
                 next_state, reward, done, info = self.env.step(action)
                 rollout.append((snapshot, action, reward, log_prob, done))
                 state = next_state

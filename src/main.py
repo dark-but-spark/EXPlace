@@ -514,11 +514,11 @@ def run(ray_envs, agent, args, reward_scaling_flag=False, store_transitions=True
         for idx in range(args.rollout_batch_size):
             if store_transitions:
                 trans = Transition(
-                    # Store half precision on the host; PPO widens once when
-                    # assembling the update tensor.  This removes the large
-                    # float32 transition footprint without changing inference.
+                    # Compact transitions use snapshots and are rebuilt by PPO.
+                    # The non-compact branch is the historical baseline and
+                    # must retain its original FP32 transition representation.
                     state=snapshots[idx] if getattr(args, 'compact_transition', False)
-                    else states[idx].astype(np.float16, copy=True),
+                    else np.asarray(states[idx], dtype=np.float32).copy(),
                     action=actions[idx],
                     reward=th.tensor(rewards[idx]) / 200.0,
                     action_log_prob=action_log_probs[idx],
@@ -579,6 +579,8 @@ def run_worker_rollouts(ray_envs, agent, args, reward_scaling_flag=False,
         for rollout, _ in results:
             for state, action, reward, log_prob, done in rollout:
                 agent.store_transition(Transition(
+                    # Keep the baseline worker protocol in FP32.  Only the
+                    # compact protocol stores a reduced snapshot object.
                     state=state,
                     action=action,
                     reward=th.tensor(reward) / 200.0,
