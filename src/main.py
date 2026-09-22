@@ -51,6 +51,7 @@ def process_args():
     parser.add_argument('--reward-weight-mode', choices=['fixed', 'ppa_correlation'], help='Override reward weight experiment mode')
     parser.add_argument('--reward-granularity', choices=['step', 'global'], help='Override step-wise or terminal global reward')
     parser.add_argument('--log-dir', type=str, help='Override the root directory for run outputs')
+    parser.add_argument('--amp-dtype', choices=['float16', 'bfloat16'], help='AMP autocast dtype')
     # BooleanOptionalAction provides paired --foo/--no-foo switches for
     # reproducible performance ablations without editing YAML files.
     for option in (
@@ -92,6 +93,8 @@ def process_args():
         config_dict['reward_granularity'] = cmd_args.reward_granularity
     if cmd_args.log_dir is not None:
         config_dict['log_dir'] = cmd_args.log_dir
+    if cmd_args.amp_dtype is not None:
+        config_dict['amp_dtype'] = cmd_args.amp_dtype
     for option in (
         'compact_transition', 'worker_rollout', 'mixed_precision',
         'async_evaluation', 'mask_cache', 'vectorized_occupancy',
@@ -115,6 +118,7 @@ def process_args():
     config_dict.setdefault('compact_transition', True)
     config_dict.setdefault('worker_rollout', True)
     config_dict.setdefault('async_evaluation', True)
+    config_dict.setdefault('worker_policy_device', 'cpu')
     config_dict.setdefault('mask_cache', True)
     config_dict.setdefault('vectorized_occupancy', True)
     config_dict.setdefault('batch_device_copy', True)

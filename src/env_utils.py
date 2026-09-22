@@ -266,9 +266,11 @@ def init_ray_envs(args, num_envs, problem):
     # Determine GPU allocation strategy
     # If using GPU, specify the number of available GPUs
     import torch
+    worker_policy_device = getattr(args, 'worker_policy_device', 'cpu')
+    worker_uses_gpu = worker_policy_device != 'cpu'
     num_gpus_available = (
         torch.cuda.device_count()
-        if getattr(args, 'use_cuda', False) and torch.cuda.is_available()
+        if worker_uses_gpu and getattr(args, 'use_cuda', False) and torch.cuda.is_available()
         else 0
     )
     
@@ -287,10 +289,15 @@ def init_ray_envs(args, num_envs, problem):
     @ray.remote(num_gpus=gpu_fraction)
     class RayEnvWorker:
         def __init__(self, args, env_params):
+            import copy
+            args = copy.copy(args)
             # Set CUDA device for this worker
             # Ray automatically sets CUDA_VISIBLE_DEVICES, so cuda:0 refers to the assigned GPU
             import torch
-            if torch.cuda.is_available() and hasattr(args, 'device') and 'cuda' in args.device:
+            if worker_policy_device == 'cpu':
+                args.device = 'cpu'
+                args.use_cuda = False
+            elif torch.cuda.is_available() and hasattr(args, 'device') and 'cuda' in args.device:
                 # Use cuda:0 which Ray maps to the assigned GPU
                 args.device = 'cuda:0'
             
@@ -327,7 +334,7 @@ def init_ray_envs(args, num_envs, problem):
             """Sync policy weights and execute one complete episode locally."""
             from agent import PPOAgent
             if self.policy_agent is None:
-                self.policy_agent = PPOAgent(args=self.env.args)
+                self.policy_agent = PPOAgent(args=self.env.args, inference_only=True)
             self.policy_agent.actor.load_state_dict(actor_state)
             self.policy_agent.set_reward_weights(reward_weights)
             self.policy_agent.train()

@@ -18,9 +18,12 @@ from model.critic import Critic
 
 
 class PPOAgent():
-    def __init__(self, args):
+    def __init__(self, args, inference_only=False):
         self.args = args
-        self.resnet = resnet18(pretrained=True)
+        self.inference_only = inference_only
+        # Worker rollouts overwrite every actor parameter with the driver's
+        # state, so they do not need to load ImageNet weights or build a critic.
+        self.resnet = resnet18(pretrained=not inference_only)
         actor_arch = getattr(args, 'actor_arch', 'parallel')
         if actor_arch == 'sequential':
             k = getattr(args, 'local_summary_k', 4)
@@ -32,14 +35,14 @@ class PPOAgent():
             self.cnn_coarse = MyCNNCoarse(args=args, res_net=self.resnet).to(args.device)
 
         self.actor = Actor(args=args, cnn=self.cnn, cnn_coarse=self.cnn_coarse).float().to(args.device)
-        self.critic = Critic(args=args, cnn_coarse=self.cnn_coarse).float().to(args.device)
+        self.critic = None if inference_only else Critic(args=args, cnn_coarse=self.cnn_coarse).float().to(args.device)
 
-        self.actor_opt = optim.Adam(self.actor.parameters(), args.lr)
-        self.critic_opt = optim.Adam(self.critic.parameters(), args.lr)
+        self.actor_opt = None if inference_only else optim.Adam(self.actor.parameters(), args.lr)
+        self.critic_opt = None if inference_only else optim.Adam(self.critic.parameters(), args.lr)
 
         self.buffer = []
         self.batch_size = args.batch_size
-        self.buffer_capacity = args.buffer_size * args.n_macro
+        self.buffer_capacity = 0 if inference_only else args.buffer_size * args.n_macro
         self.counter = 0
         self.training_step = 0
 
@@ -161,7 +164,12 @@ class PPOAgent():
                     with (th.autocast(device_type=batch_state.device.type, dtype=self.amp_dtype)
                           if self.mixed_precision else nullcontext()):
                         critic_output = self.critic(batch_state[:, :1])
-                    advantage = (target_v - critic_output).detach()
+                    # CUDA BF16 has no smooth_l1 backward kernel in some
+                    # PyTorch builds. Keep the loss and advantage in FP32
+                    # while retaining autocast for the critic forward pass.
+                    critic_output_fp32 = critic_output.float()
+                    target_v_fp32 = target_v.float()
+                    advantage = (target_v_fp32 - critic_output_fp32).detach()
                     L1 = ratio * advantage.squeeze() 
                     L2 = th.clamp(ratio, 1-self.args.clip_param, 1+self.args.clip_param) * advantage.squeeze() 
                     action_loss = -th.min(L1, L2).mean() 
@@ -171,7 +179,7 @@ class PPOAgent():
                     nn.utils.clip_grad_norm_(self.actor.parameters(), self.args.max_grad_norm)
                     self.actor_opt.step()
 
-                    value_loss = nn.functional.smooth_l1_loss(critic_output, target_v)
+                    value_loss = nn.functional.smooth_l1_loss(critic_output_fp32, target_v_fp32)
                     self.critic_opt.zero_grad()
                     value_loss.backward()
                     nn.utils.clip_grad_norm_(self.critic.parameters(), self.args.max_grad_norm)
@@ -235,9 +243,11 @@ class PPOAgent():
     def train(self):
         self.training = True
         self.actor.train()
-        self.critic.train()
+        if self.critic is not None:
+            self.critic.train()
 
     def eval(self):
         self.training = False
         self.actor.eval()
-        self.critic.eval()
+        if self.critic is not None:
+            self.critic.eval()

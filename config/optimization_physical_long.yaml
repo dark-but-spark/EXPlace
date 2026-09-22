@@ -30,6 +30,7 @@ global_reward_gamma: 1.0
 
 compact_transition: true
 worker_rollout: true
+worker_policy_device: cpu
 mixed_precision: false
 amp_dtype: bfloat16
 async_evaluation: true

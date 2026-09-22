@@ -218,3 +218,18 @@ but increased PPO time from about 1.71 s to 5.13 s. The cumulative optimized
 variant had about 17.06 s rollout and 3.62 s PPO, so its total did not beat the
 baseline. These are 600-episode `superblue18` runs with 10 environments and no
 physical evaluation, not placement-quality results.
+
+### Follow-up fixes for GPU failures
+
+- `seed=4` was assigned to physical GPU 1 in every failed row. The logs show
+  CUDA OOM during worker agent construction or PPO forward; this is a
+  GPU-specific resource failure, not a seed-dependent algorithm failure.
+- The cause was structural: each worker rollout created a complete PPO agent
+  (actor, ResNet, critic, and optimizers) while requesting only a fractional
+  Ray GPU resource. Fractional scheduling does not cap actual memory. Workers
+  now default to `worker_policy_device: cpu` and construct actor-only
+  inference agents, so they do not compete with the driver model for GPU
+  memory.
+- BF16 rows failed at `smooth_l1_backward_cuda` because the installed PyTorch
+  build lacks that BF16 kernel. Critic loss and advantage calculation now cast
+  to FP32; BF16 should be rerun before claiming AMP speedup.
