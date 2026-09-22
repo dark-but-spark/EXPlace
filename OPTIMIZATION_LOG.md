@@ -231,5 +231,20 @@ physical evaluation, not placement-quality results.
   inference agents, so they do not compete with the driver model for GPU
   memory.
 - BF16 rows failed at `smooth_l1_backward_cuda` because the installed PyTorch
-  build lacks that BF16 kernel. Critic loss and advantage calculation now cast
-  to FP32; BF16 should be rerun before claiming AMP speedup.
+  build lacks that BF16 kernel. The fallback is now restricted to the opt-in
+  `mixed_precision=true, amp_dtype=bfloat16` path; the default FP32 baseline
+  does not perform the extra casts or change its loss code path.
+
+## Phase 13: preserve the original baseline transition path
+
+- Change: when `compact_transition=false`, driver and worker rollouts retain
+  complete FP32 observations and PPO materializes them as FP32. FP16 host
+  storage is now used only by the explicit compact-transition path.
+- Reason: the long-run baseline already disabled the named optimizations, but
+  an unconditional FP16 cast still changed its memory and numerical path.
+  This made A/B wall-time ratios incomparable with the historical baseline.
+- Verification: `tests/test_batch_device_copy.py` covers both FP32 baseline
+  preservation and compact FP16 storage; full unittest suite is 26/26 passing.
+- Measurement: this is an experiment-validity correction, not a speedup claim.
+  Re-run baseline/optimized pairs after the correction before publishing new
+  component or wall-clock multipliers.
