@@ -1,0 +1,15 @@
+--- a/cmake/TorchExtension.cmake
++++ b/cmake/TorchExtension.cmake
+@@ -15,6 +15,13 @@ list(GET TORCH_OUTPUT_LIST 0 TORCH_INSTALL_PREFIX)
+ list(GET TORCH_OUTPUT_LIST 1 TORCH_ENABLE_CUDA)
+ list(GET TORCH_OUTPUT_LIST 2 TORCH_VERSION)
++option(
++  DREAMPLACE_FORCE_CUDA
++  "Build CUDA extensions when the toolkit exists but no runtime GPU is visible"
++  OFF)
++if (DREAMPLACE_FORCE_CUDA)
++  set(TORCH_ENABLE_CUDA 1)
++endif()
+ string(REPLACE "." ";" TORCH_VERSION_LIST ${TORCH_VERSION})
+ list(GET TORCH_VERSION_LIST 0 TORCH_VERSION_MAJOR)
+ list(GET TORCH_VERSION_LIST 1 TORCH_VERSION_MINOR)

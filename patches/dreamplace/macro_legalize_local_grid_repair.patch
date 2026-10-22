@@ -1,0 +1,205 @@
+diff --git a/dreamplace/ops/macro_legalize/src/macro_legalize.cpp b/dreamplace/ops/macro_legalize/src/macro_legalize.cpp
+index f361d2c..3ae9bb0 100644
+--- a/dreamplace/ops/macro_legalize/src/macro_legalize.cpp
++++ b/dreamplace/ops/macro_legalize/src/macro_legalize.cpp
+@@ -482,6 +482,200 @@ bool macroLegalizationLauncher(LegalizationDB<T> db) {
+ 
+   legal = check_macro_legality(db, macros, false);
+ 
++  // Rounding down can reintroduce overlaps with fixed macros even when the
++  // continuous legalization was legal. Repair these grid-induced failures
++  // greedily: accept a nearby grid position when it reduces the moved
++  // macro's overlap count or area. An
++  // unresolved layout remains illegal and is rejected by the caller.
++  if (!legal) {
++    auto align_x = [&](T value, T width) {
++      T upper = std::max(db.xl, db.xh - width);
++      T clamped = std::max(db.xl, std::min(value, upper));
++      return db.align2site(clamped, width);
++    };
++    auto align_y = [&](T value, T height) {
++      T upper = std::max(db.yl, db.yh - height);
++      T clamped = std::max(db.yl, std::min(value, upper));
++      return db.align2row(clamped, height);
++    };
++
++    struct OverlapScore {
++      int count;
++      T area;
++    };
++    auto node_overlap_score = [&](int node_id) {
++      OverlapScore score{0, 0};
++      auto add_overlap = [&](T xl1, T yl1, T width1, T height1, T xl2,
++                             T yl2, T width2, T height2) {
++        T overlap_x = std::min(xl1 + width1, xl2 + width2) -
++                      std::max(xl1, xl2);
++        T overlap_y = std::min(yl1 + height1, yl2 + height2) -
++                      std::max(yl1, yl2);
++        if (overlap_x > 0 && overlap_y > 0) {
++          ++score.count;
++          score.area += overlap_x * overlap_y;
++        }
++      };
++      for (int other_id : macros) {
++        if (other_id != node_id) {
++          add_overlap(db.x[node_id], db.y[node_id], db.node_size_x[node_id],
++                      db.node_size_y[node_id], db.x[other_id], db.y[other_id],
++                      db.node_size_x[other_id], db.node_size_y[other_id]);
++        }
++      }
++      for (int other_id = db.num_movable_nodes; other_id < db.num_nodes;
++           ++other_id) {
++        add_overlap(db.x[node_id], db.y[node_id], db.node_size_x[node_id],
++                    db.node_size_y[node_id], db.init_x[other_id],
++                    db.init_y[other_id], db.node_size_x[other_id],
++                    db.node_size_y[other_id]);
++      }
++      return score;
++    };
++    auto improves = [](const OverlapScore& candidate,
++                       const OverlapScore& current) {
++      return candidate.count < current.count ||
++             (candidate.count == current.count && candidate.area < current.area);
++    };
++
++    auto align_x_up = [&](T value, T width) {
++      T upper = std::max(db.xl, db.xh - width);
++      T clamped = std::max(db.xl, std::min(value, upper));
++      T steps = std::ceil((clamped - db.xl) / db.site_width - 1e-6);
++      T max_steps = std::floor((upper - db.xl) / db.site_width + 1e-6);
++      return db.xl + std::min(steps, max_steps) * db.site_width;
++    };
++    auto align_y_up = [&](T value, T height) {
++      T upper = std::max(db.yl, db.yh - height);
++      T clamped = std::max(db.yl, std::min(value, upper));
++      T steps = std::ceil((clamped - db.yl) / db.row_height - 1e-6);
++      T max_steps = std::floor((upper - db.yl) / db.row_height + 1e-6);
++      return db.yl + std::min(steps, max_steps) * db.row_height;
++    };
++
++    // Move one conflicted macro to the nearest grid-aligned side of an
++    // overlapping obstacle. Other conflicts may remain and are handled in
++    // subsequent rounds.
++    for (int round = 0; round < 16; ++round) {
++      bool moved = false;
++      for (int node_id : macros) {
++        T original_x = db.x[node_id];
++        T original_y = db.y[node_id];
++        T width = db.node_size_x[node_id];
++        T height = db.node_size_y[node_id];
++        OverlapScore best = node_overlap_score(node_id);
++        if (best.count == 0) {
++          continue;
++        }
++        T best_x = original_x;
++        T best_y = original_y;
++        auto try_obstacle = [&](T obstacle_xl, T obstacle_yl, T obstacle_xh,
++                                T obstacle_yh) {
++          T left = align_x(obstacle_xl - width, width);
++          T right = align_x_up(obstacle_xh, width);
++          T below = align_y(obstacle_yl - height, height);
++          T above = align_y_up(obstacle_yh, height);
++          T candidates[8][2] = {
++              {align_x(obstacle_xl - width, width), original_y},
++              {align_x_up(obstacle_xh, width), original_y},
++              {original_x, align_y(obstacle_yl - height, height)},
++              {original_x, align_y_up(obstacle_yh, height)},
++              {left, below},
++              {left, above},
++              {right, below},
++              {right, above}};
++          for (const auto& candidate : candidates) {
++            db.x[node_id] = candidate[0];
++            db.y[node_id] = candidate[1];
++            OverlapScore candidate_score = node_overlap_score(node_id);
++            if (improves(candidate_score, best)) {
++              best = candidate_score;
++              best_x = candidate[0];
++              best_y = candidate[1];
++            }
++          }
++          db.x[node_id] = original_x;
++          db.y[node_id] = original_y;
++        };
++        for (int other_id : macros) {
++          if (other_id == node_id) {
++            continue;
++          }
++          T obstacle_xl = db.x[other_id];
++          T obstacle_yl = db.y[other_id];
++          T obstacle_xh = obstacle_xl + db.node_size_x[other_id];
++          T obstacle_yh = obstacle_yl + db.node_size_y[other_id];
++          if (std::min(original_x + width, obstacle_xh) >
++                  std::max(original_x, obstacle_xl) &&
++              std::min(original_y + height, obstacle_yh) >
++                  std::max(original_y, obstacle_yl)) {
++            try_obstacle(obstacle_xl, obstacle_yl, obstacle_xh, obstacle_yh);
++          }
++        }
++        for (int other_id = db.num_movable_nodes; other_id < db.num_nodes;
++             ++other_id) {
++          T obstacle_xl = db.init_x[other_id];
++          T obstacle_yl = db.init_y[other_id];
++          T obstacle_xh = obstacle_xl + db.node_size_x[other_id];
++          T obstacle_yh = obstacle_yl + db.node_size_y[other_id];
++          if (std::min(original_x + width, obstacle_xh) >
++                  std::max(original_x, obstacle_xl) &&
++              std::min(original_y + height, obstacle_yh) >
++                  std::max(original_y, obstacle_yl)) {
++            try_obstacle(obstacle_xl, obstacle_yl, obstacle_xh, obstacle_yh);
++          }
++        }
++        // A macro can be trapped by several blockers so that every immediate
++        // side or corner still overlaps another obstacle. Search a bounded
++        // neighborhood on the legal placement grid to escape that local
++        // minimum without ever accepting a worse overlap score.
++        for (int dx = -64; dx <= 64; ++dx) {
++          for (int dy = -64; dy <= 64; ++dy) {
++            if (dx == 0 && dy == 0) {
++              continue;
++            }
++            T candidate_x = align_x(original_x + dx * db.site_width, width);
++            T candidate_y = align_y(original_y + dy * db.row_height, height);
++            db.x[node_id] = candidate_x;
++            db.y[node_id] = candidate_y;
++            OverlapScore candidate_score = node_overlap_score(node_id);
++            if (improves(candidate_score, best)) {
++              best = candidate_score;
++              best_x = candidate_x;
++              best_y = candidate_y;
++            }
++          }
++        }
++        db.x[node_id] = original_x;
++        db.y[node_id] = original_y;
++        db.x[node_id] = best_x;
++        db.y[node_id] = best_y;
++        moved = moved || best_x != original_x || best_y != original_y;
++      }
++      legal = check_macro_legality(db, macros, true);
++      if (legal || !moved) {
++        break;
++      }
++    }
++    if (!legal) {
++      legal = check_macro_legality(db, macros, false);
++    }
++  }
++
++  // The local repair may reach a plateau when surrounding fixed macros leave
++  // no improving placement nearby. Fall back to DREAMPlace's native Hannan
++  // grid search, then verify the fully aligned result before accepting it.
++  if (!legal) {
++    dreamplacePrint(kWARN,
++                    "Local macro grid repair stalled; retry Hannan legalization\n");
++    hannanLegalizeLauncher(db, macros, fixed_macros, 10);
++    for (int node_id : macros) {
++      db.x[node_id] = db.align2site(db.x[node_id], db.node_size_x[node_id]);
++      db.y[node_id] = db.align2row(db.y[node_id], db.node_size_y[node_id]);
++    }
++    legal = check_macro_legality(db, macros, false);
++  }
++
+   return legal;
+ }
+ 

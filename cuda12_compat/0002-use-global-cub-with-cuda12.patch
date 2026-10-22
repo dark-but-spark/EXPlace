@@ -1,0 +1,22 @@
+--- a/dreamplace/ops/utility/src/utils_cub.cuh
++++ b/dreamplace/ops/utility/src/utils_cub.cuh
+@@ -10,8 +10,12 @@
+ #define _DREAMPLACE_UTILITY_UTILS_CUB_CUH
+ 
+ #include "utility/src/namespace.h"
++#include "cuda.h"
+ 
+ // include cub in a safe manner
++#if CUDA_VERSION >= 12000
++#include "cub/cub.cuh"
++#else
+ #define CUB_NS_PREFIX namespace DREAMPLACE_NAMESPACE {
+ #define CUB_NS_POSTFIX }
+ #define CUB_NS_QUALIFIER DREAMPLACE_NAMESPACE::cub
+@@ -19,5 +23,6 @@
+ #undef CUB_NS_QUALIFIER
+ #undef CUB_NS_POSTFIX
+ #undef CUB_NS_PREFIX
++#endif
+ 
+ #endif
