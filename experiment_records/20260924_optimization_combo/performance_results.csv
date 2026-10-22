@@ -1,0 +1,16 @@
+variant,benchmark,seed,gpu,status,duration_seconds,mean_rollout_seconds,mean_ppo_seconds,log_dir
+baseline,superblue18,3,0,SUCCESS,641,9.394728,0.794187,/data0/cjy_cxsj/EXPlace-test/EXPlace/optimization_runs/combo_long_20260924_061555/baseline/superblue18/seed_3
+masks_ppo,superblue18,3,0,SUCCESS,626,9.270630,0.634755,/data0/cjy_cxsj/EXPlace-test/EXPlace/optimization_runs/combo_long_20260924_061555/masks_ppo/superblue18/seed_3
+masks_amp_bf16,superblue18,3,0,SUCCESS,625,9.236908,0.657390,/data0/cjy_cxsj/EXPlace-test/EXPlace/optimization_runs/combo_long_20260924_061555/masks_amp_bf16/superblue18/seed_3
+ppo_amp_bf16,superblue18,3,0,SUCCESS,634,9.576305,0.503622,/data0/cjy_cxsj/EXPlace-test/EXPlace/optimization_runs/combo_long_20260924_061555/ppo_amp_bf16/superblue18/seed_3
+masks_ppo_amp_bf16,superblue18,3,2,SUCCESS,618,9.297147,0.505572,/data0/cjy_cxsj/EXPlace-test/EXPlace/optimization_runs/combo_long_20260924_061555/masks_ppo_amp_bf16/superblue18/seed_3
+baseline,superblue18,4,0,SUCCESS,645,9.477950,0.795068,/data0/cjy_cxsj/EXPlace-test/EXPlace/optimization_runs/combo_long_20260924_061555/baseline/superblue18/seed_4
+masks_ppo,superblue18,4,0,SUCCESS,629,9.339437,0.640747,/data0/cjy_cxsj/EXPlace-test/EXPlace/optimization_runs/combo_long_20260924_061555/masks_ppo/superblue18/seed_4
+masks_amp_bf16,superblue18,4,0,SUCCESS,631,9.366057,0.657645,/data0/cjy_cxsj/EXPlace-test/EXPlace/optimization_runs/combo_long_20260924_061555/masks_amp_bf16/superblue18/seed_4
+ppo_amp_bf16,superblue18,4,0,SUCCESS,638,9.631157,0.505590,/data0/cjy_cxsj/EXPlace-test/EXPlace/optimization_runs/combo_long_20260924_061555/ppo_amp_bf16/superblue18/seed_4
+masks_ppo_amp_bf16,superblue18,4,0,SUCCESS,619,9.303202,0.508383,/data0/cjy_cxsj/EXPlace-test/EXPlace/optimization_runs/combo_long_20260924_061555/masks_ppo_amp_bf16/superblue18/seed_4
+baseline,superblue18,5,0,SUCCESS,650,9.539357,0.793155,/data0/cjy_cxsj/EXPlace-test/EXPlace/optimization_runs/combo_long_20260924_061555/baseline/superblue18/seed_5
+masks_ppo,superblue18,5,0,SUCCESS,624,9.224405,0.635388,/data0/cjy_cxsj/EXPlace-test/EXPlace/optimization_runs/combo_long_20260924_061555/masks_ppo/superblue18/seed_5
+masks_amp_bf16,superblue18,5,0,SUCCESS,623,9.217747,0.656095,/data0/cjy_cxsj/EXPlace-test/EXPlace/optimization_runs/combo_long_20260924_061555/masks_amp_bf16/superblue18/seed_5
+ppo_amp_bf16,superblue18,5,0,SUCCESS,631,9.516177,0.503273,/data0/cjy_cxsj/EXPlace-test/EXPlace/optimization_runs/combo_long_20260924_061555/ppo_amp_bf16/superblue18/seed_5
+masks_ppo_amp_bf16,superblue18,5,0,SUCCESS,622,9.353590,0.503595,/data0/cjy_cxsj/EXPlace-test/EXPlace/optimization_runs/combo_long_20260924_061555/masks_ppo_amp_bf16/superblue18/seed_5

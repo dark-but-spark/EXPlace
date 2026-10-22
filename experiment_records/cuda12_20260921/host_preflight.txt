@@ -1,0 +1,93 @@
+captured_utc=2026-09-21T08:22:43Z
+project_root=/data0/cjy_cxsj/EXPlace-test/EXPlace
+pwd=/data0/cjy_cxsj/EXPlace-test/EXPlace
+python_path=/usr/bin/python3
+python_version=Python 3.10.12
+cmake_path=/data0/cjy_cxsj/.local/bin/cmake
+cmake_version=cmake version 4.4.3
+cxx_path=/usr/bin/c++
+cxx_version=c++ (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0
+git_commit=529114a6d4c9b0d7938d2f037a5da07b11b89c68
+git_branch=cjy-test
+git_status_begin
+ M .gitignore
+ M EFFICIENCY.md
+D  hcg.lp
+ M script/run_experiment_matrix.sh
+D  vcg.lp
+?? CUDA12_MIGRATION.md
+?? EXPERIMENT_ARCHIVE.md
+?? TODO.md
+?? experiment_records/
+?? script/build_dreamplace_cuda12.sh
+?? script/capture_run_metadata.sh
+?? script/summarize_experiment.py
+?? tests/test_summarize_experiment.py
+git_status_end
+python_probe_begin
+/data0/cjy_cxsj/.local/lib/python3.10/site-packages/torch/cuda/__init__.py:546: UserWarning: Can't initialize NVML
+  warnings.warn("Can't initialize NVML")
+executable=/usr/bin/python3
+torch=2.0.0+cu118
+torch_cuda=11.8
+cuda_available=False
+cuda_device_count=0
+python_probe_end
+nvcc_begin
+nvcc_path=/usr/local/cuda-12.2/bin/nvcc
+nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2023 NVIDIA Corporation
+Built on Tue_Aug_15_22:02:13_PDT_2023
+Cuda compilation tools, release 12.2, V12.2.140
+Build cuda_12.2.r12.2/compiler.33191640_0
+nvcc_end
+driver_begin
+NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver. Make sure that the latest NVIDIA driver is installed and running.
+
+driver_end
+gpu_pci_begin
+01:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:26b1] (rev a1)
+01:00.1 Audio device [0403]: NVIDIA Corporation Device [10de:22ba] (rev a1)
+21:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:26b1] (rev a1)
+21:00.1 Audio device [0403]: NVIDIA Corporation Device [10de:22ba] (rev a1)
+41:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:26b1] (rev a1)
+41:00.1 Audio device [0403]: NVIDIA Corporation Device [10de:22ba] (rev a1)
+61:00.0 3D controller [0302]: NVIDIA Corporation Device [10de:26b9] (rev a1)
+63:00.0 VGA compatible controller [0300]: ASPEED Technology, Inc. ASPEED Graphics Family [1a03:2000] (rev 52)
+81:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:26b1] (rev a1)
+81:00.1 Audio device [0403]: NVIDIA Corporation Device [10de:22ba] (rev a1)
+a1:00.0 3D controller [0302]: NVIDIA Corporation Device [10de:26b9] (rev a1)
+c1:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:26b1] (rev a1)
+c1:00.1 Audio device [0403]: NVIDIA Corporation Device [10de:22ba] (rev a1)
+e1:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:26b1] (rev a1)
+e1:00.1 Audio device [0403]: NVIDIA Corporation Device [10de:22ba] (rev a1)
+gpu_pci_end
+dreamplace_build_begin
+build_cache_begin
+CMAKE_BUILD_TYPE:STRING=Release
+CMAKE_CXX_ABI:STRING=0
+CMAKE_INSTALL_PREFIX:PATH=/data0/cjy_cxsj/EXPlace-test/EXPlace/DREAMPlace/install
+CUDA_TOOLKIT_ROOT_DIR:PATH=/data0/cjy_cxsj/bin/cuda-11.8
+CUDA_VERSION:STRING=11.8
+PYTHON_EXECUTABLE:FILEPATH=
+build_cache_end
+build-cuda12_cache_begin
+cmake_cache=unavailable
+build-cuda12_cache_end
+install_configure_begin
+        "CMAKE_CXX_COMPILER" : "/usr/bin/c++", 
+        "CMAKE_BUILD_TYPE" : "Release", 
+        "CMAKE_CXX_ABI" : "0", 
+        "CUDA_FOUND" : "TRUE", 
+        "CUDA_TOOLKIT_ROOT_DIR" : "/data0/cjy_cxsj/bin/cuda-11.8", 
+install_configure_end
+install-cuda12_configure_begin
+dreamplace_configure=unavailable
+install-cuda12_configure_end
+dreamplace_build_end
+tracked_generated_files_begin
+hcg.lp=not_tracked
+5dc927cfade9aa2a64c7eaa7ca797eee653f4df4fd55d25ec7b3499976c51d5a  /data0/cjy_cxsj/EXPlace-test/EXPlace/hcg.lp
+vcg.lp=not_tracked
+196f5013176f894a3e220d9e2e9bbc91a92aae2a0ddbf9acd458466246b45687  /data0/cjy_cxsj/EXPlace-test/EXPlace/vcg.lp
+tracked_generated_files_end

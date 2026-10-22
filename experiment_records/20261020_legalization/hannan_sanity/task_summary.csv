@@ -1,0 +1,3 @@
+variant,benchmark,seed,gpu,status,exit_code,duration_seconds,task_dir
+adaptive_global,superblue18,3,5,SUCCESS,0,370,/data0/cjy_cxsj/EXPlace-test/EXPlace/long_runs/legalization_hannan_fix_20261020_093027/adaptive_global/superblue18/seed_3
+adaptive_step,superblue18,3,3,SUCCESS,0,384,/data0/cjy_cxsj/EXPlace-test/EXPlace/long_runs/legalization_hannan_fix_20261020_093027/adaptive_step/superblue18/seed_3

@@ -1,0 +1,3 @@
+task_id	variant	benchmark	seed	gpu	task_dir
+0	adaptive_step	superblue18	3	3	/data0/cjy_cxsj/EXPlace-test/EXPlace/long_runs/legalization_hannan_fix_20261020_093027/adaptive_step/superblue18/seed_3
+1	adaptive_global	superblue18	3	5	/data0/cjy_cxsj/EXPlace-test/EXPlace/long_runs/legalization_hannan_fix_20261020_093027/adaptive_global/superblue18/seed_3

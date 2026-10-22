@@ -1,0 +1,144 @@
+captured_utc=2026-10-12T09:56:52Z
+project_root=/data0/cjy_cxsj/EXPlace-test/EXPlace
+pwd=/data0/cjy_cxsj/EXPlace-test/EXPlace
+python_path=/usr/bin/python3
+python_version=Python 3.10.12
+cmake_path=/data0/cjy_cxsj/.local/bin/cmake
+cmake_version=cmake version 4.4.3
+cxx_path=/usr/bin/c++
+cxx_version=c++ (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0
+git_commit=a341ef8491e4bf59e271557fbf34392ccbf8ef33
+git_branch=cjy-test
+git_status_begin
+ M .gitignore
+ M LONG_RUN.md
+ M OPTIMIZATION_LOG.md
+ M README.md
+ M hcg.lp
+ M script/run_RL.sh
+ M script/run_experiment_matrix.sh
+ M script/run_optimization_long.sh
+ M src/agent.py
+ M src/main.py
+ M src/model/actor.py
+ M src/place_env/place_env.py
+ M src/state_parsing.py
+ M src/utils/log_utils.py
+ M tests/test_batch_device_copy.py
+ M tests/test_performance_defaults.py
+ M vcg.lp
+?? CUDA12_MIGRATION.md
+?? EXPERIMENT_ARCHIVE.md
+?? TODO.md
+?? config/adaptive_sanity.yaml
+?? config/compare_gpu_quick.yaml
+?? config/compare_physical_quick.yaml
+?? config/optimization_gpu_long.yaml
+?? cuda12_compat/
+?? experiment_records/
+?? optimization_runs/
+?? script/activate_cuda118.sh
+?? script/analyze_quality.py
+?? script/analyze_reward_matrix.py
+?? script/build_dreamplace_cuda12.sh
+?? script/capture_run_metadata.sh
+?? script/prepare_dreamplace_cuda12_source.sh
+?? script/summarize_experiment.py
+?? tests/test_adaptive_evaluation.py
+?? tests/test_device_selection.py
+?? tests/test_policy_mask.py
+?? tests/test_summarize_experiment.py
+git_status_end
+python_probe_begin
+executable=/usr/bin/python3
+torch=2.0.0+cu118
+torch_cuda=11.8
+cuda_available=True
+cuda_device_count=8
+cuda_device_0=NVIDIA RTX 6000 Ada Generation
+cuda_capability_0=(8, 9)
+cuda_device_1=NVIDIA RTX 6000 Ada Generation
+cuda_capability_1=(8, 9)
+cuda_device_2=NVIDIA RTX 6000 Ada Generation
+cuda_capability_2=(8, 9)
+cuda_device_3=NVIDIA L40S
+cuda_capability_3=(8, 9)
+cuda_device_4=NVIDIA RTX 6000 Ada Generation
+cuda_capability_4=(8, 9)
+cuda_device_5=NVIDIA L40S
+cuda_capability_5=(8, 9)
+cuda_device_6=NVIDIA RTX 6000 Ada Generation
+cuda_capability_6=(8, 9)
+cuda_device_7=NVIDIA RTX 6000 Ada Generation
+cuda_capability_7=(8, 9)
+python_probe_end
+nvcc_begin
+nvcc_path=/data0/cjy_cxsj/cuda/bin/nvcc
+nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2022 NVIDIA Corporation
+Built on Wed_Sep_21_10:33:58_PDT_2022
+Cuda compilation tools, release 11.8, V11.8.89
+Build cuda_11.8.r11.8/compiler.31833905_0
+nvcc_end
+driver_begin
+NVIDIA RTX 6000 Ada Generation, 580.173.02, 8.9
+NVIDIA RTX 6000 Ada Generation, 580.173.02, 8.9
+NVIDIA RTX 6000 Ada Generation, 580.173.02, 8.9
+NVIDIA L40S, 580.173.02, 8.9
+NVIDIA RTX 6000 Ada Generation, 580.173.02, 8.9
+NVIDIA L40S, 580.173.02, 8.9
+NVIDIA RTX 6000 Ada Generation, 580.173.02, 8.9
+NVIDIA RTX 6000 Ada Generation, 580.173.02, 8.9
+driver_end
+gpu_pci_begin
+01:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:26b1] (rev a1)
+01:00.1 Audio device [0403]: NVIDIA Corporation Device [10de:22ba] (rev a1)
+21:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:26b1] (rev a1)
+21:00.1 Audio device [0403]: NVIDIA Corporation Device [10de:22ba] (rev a1)
+41:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:26b1] (rev a1)
+41:00.1 Audio device [0403]: NVIDIA Corporation Device [10de:22ba] (rev a1)
+61:00.0 3D controller [0302]: NVIDIA Corporation Device [10de:26b9] (rev a1)
+63:00.0 VGA compatible controller [0300]: ASPEED Technology, Inc. ASPEED Graphics Family [1a03:2000] (rev 52)
+81:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:26b1] (rev a1)
+81:00.1 Audio device [0403]: NVIDIA Corporation Device [10de:22ba] (rev a1)
+a1:00.0 3D controller [0302]: NVIDIA Corporation Device [10de:26b9] (rev a1)
+c1:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:26b1] (rev a1)
+c1:00.1 Audio device [0403]: NVIDIA Corporation Device [10de:22ba] (rev a1)
+e1:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:26b1] (rev a1)
+e1:00.1 Audio device [0403]: NVIDIA Corporation Device [10de:22ba] (rev a1)
+gpu_pci_end
+dreamplace_build_begin
+build_cache_begin
+CMAKE_BUILD_TYPE:STRING=Release
+CMAKE_CXX_ABI:STRING=0
+CMAKE_INSTALL_PREFIX:PATH=/data0/cjy_cxsj/EXPlace-test/EXPlace/DREAMPlace/install
+CUDA_TOOLKIT_ROOT_DIR:PATH=/data0/cjy_cxsj/bin/cuda-11.8
+CUDA_VERSION:STRING=11.8
+PYTHON_EXECUTABLE:FILEPATH=
+build_cache_end
+build-cuda12_cache_begin
+CMAKE_BUILD_TYPE:STRING=Release
+CMAKE_CUDA_ARCHITECTURES:UNINITIALIZED=8.9
+CMAKE_CXX_ABI:STRING=0
+CMAKE_INSTALL_PREFIX:PATH=/data0/cjy_cxsj/EXPlace-test/EXPlace/DREAMPlace/install-cuda12
+CUDA_TOOLKIT_ROOT_DIR:UNINITIALIZED=/usr/local/cuda-12.2
+CUDA_VERSION:STRING=12.2
+PYTHON_EXECUTABLE:FILEPATH=/usr/bin/python3
+build-cuda12_cache_end
+install_configure_begin
+        "CMAKE_CXX_COMPILER" : "/usr/bin/c++", 
+        "CMAKE_BUILD_TYPE" : "Release", 
+        "CMAKE_CXX_ABI" : "0", 
+        "CUDA_FOUND" : "TRUE", 
+        "CUDA_TOOLKIT_ROOT_DIR" : "/data0/cjy_cxsj/bin/cuda-11.8", 
+install_configure_end
+install-cuda12_configure_begin
+dreamplace_configure=unavailable
+install-cuda12_configure_end
+dreamplace_build_end
+tracked_generated_files_begin
+hcg.lp=tracked
+25b6af7523e9830ac8ea8e71cd0fa55abdf8aa5d76cd1885b7e6043a92f3e1a8  /data0/cjy_cxsj/EXPlace-test/EXPlace/hcg.lp
+vcg.lp=tracked
+a42ed82151c69a2a20858ab8cde3692717504605901885e4e0951d1800eac82f  /data0/cjy_cxsj/EXPlace-test/EXPlace/vcg.lp
+tracked_generated_files_end

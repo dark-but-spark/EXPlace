@@ -1,0 +1,3 @@
+variant,benchmark,seeds,run_count,logged_rows_per_run,physical_evaluations_per_run,invalid_evaluations_per_run,mean_best_gp_hpwl,mean_best_tns,mean_best_wns,mean_final_gp_hpwl,mean_final_tns,mean_final_wns,mean_gp_best_to_final_percent,mean_tns_best_to_final_percent,mean_wns_best_to_final_percent
+adaptive_global,superblue18,3,1,5,5,0,282438688.0,-190.61776,-28.78944140625,286144480.0,-216.38746,-28.78944140625,1.3120695419743629,13.519044605287567,0.0
+adaptive_step,superblue18,3,1,5,5,0,278806112.0,-237.82936,-33.2153203125,278806112.0,-297.0072,-37.687234375,0.0,24.882478765447633,13.463407910647422
