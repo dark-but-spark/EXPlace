@@ -53,6 +53,15 @@ def make_agent(batch_device_copy, compact_transition=True):
 
 
 class BatchDeviceCopyTest(unittest.TestCase):
+    def test_bfloat16_amp_keeps_value_loss_in_fp32(self):
+        agent = make_agent(True)
+        agent.mixed_precision = True
+        agent.amp_dtype = torch.bfloat16
+        duration, actor_loss, critic_loss = agent.update()
+        self.assertGreaterEqual(duration, 0.0)
+        self.assertTrue(np.isfinite(actor_loss))
+        self.assertTrue(np.isfinite(critic_loss))
+
     def test_staged_and_per_minibatch_paths_both_update(self):
         for enabled in (True, False):
             agent = make_agent(enabled)

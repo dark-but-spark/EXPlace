@@ -26,6 +26,8 @@ class AsyncPhysicalEvaluator:
             "episode": int(episode),
             "macro_pos": frozen_pos,
             "metrics": tuple(float(value) for value in metrics),
+            "valid": bool(self.problem.last_evaluation_valid),
+            "failure_reason": self.problem.last_evaluation_failure,
         }
 
     def save_placement(self, path):

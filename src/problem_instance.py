@@ -48,6 +48,8 @@ class ProblemInstance():
             self.timer = None
         self.dmp_placer = NonLinearPlace(self.dmp_params, self.dmp_placedb, timer=self.timer)
         self.results = {}
+        self.last_evaluation_valid = True
+        self.last_evaluation_failure = ""
 
         self.max_width = self.dmp_placedb.xh - self.dmp_placedb.xl
         self.max_height = self.dmp_placedb.yh - self.dmp_placedb.yl
@@ -196,7 +198,9 @@ class ProblemInstance():
 
     def evaluate(self, macro_pos):
         if len(macro_pos) == 0:
-            return np.inf
+            self.last_evaluation_valid = False
+            self.last_evaluation_failure = "empty_macro_position"
+            return float("inf"), float("-inf"), float("-inf")
 
         self.apply(macro_pos=macro_pos)
 
@@ -209,6 +213,24 @@ class ProblemInstance():
         self.results['placement'] = (self.dmp_placedb.node_x.copy(),
                                     self.dmp_placedb.node_y.copy())
         self.results['figure'] = copy.copy(self.dmp_placer.pos[0].data.clone().cpu().numpy())
+
+        # DREAMPlace can log a legalization failure and still return a
+        # placement. Treat that output as diagnostic only. In particular, it
+        # must not update best checkpoints or adaptive reward weights.
+        self.last_evaluation_valid = False
+        self.last_evaluation_failure = "dreamplace_legality_check_failed"
+        try:
+            self.last_evaluation_valid = bool(
+                self.dmp_placer.op_collections.legality_check_op(
+                    self.dmp_placer.pos[0]
+                )
+            )
+            if self.last_evaluation_valid:
+                self.last_evaluation_failure = ""
+        except Exception as error:
+            self.last_evaluation_failure = (
+                f"legality_check_exception:{type(error).__name__}"
+            )
         
         # Evaluate timing metrics (TNS and WNS) if timing optimization is enabled
         if self.args.use_timer_for_evaluation:

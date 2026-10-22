@@ -84,7 +84,7 @@ python -m src.main --benchmark <design_name> --config <config_name> [options]
 | ------------- | -------- | ---------------------------------------------------------------- |
 | `--benchmark` | Yes      | Design name (e.g. `superblue3`, `superblue1`)                    |
 | `--config`    | Yes      | Config name without `.yaml`; file is `config/<config_name>.yaml` |
-| `--gpu`       | No       | GPU id (overrides `gpu` in config)                               |
+| `--gpu`       | No       | GPU id (overrides `gpu` in config); otherwise inherit the scheduler allocation |
 | `--seed`      | No       | Random seed (overrides `seed` in config)                         |
 | `--debug`     | No       | Debug mode: single env, drops into pdb                           |
 
@@ -99,6 +99,16 @@ python -m src.main --benchmark superblue3 --config iccad --gpu 0 --seed 3
 
 ```bash
 bash script/run_RL.sh
+```
+
+The launchers do not choose a physical GPU when `GPU_IDS` is unset. To rerun a
+single seed on a reserved device, let the scheduler restrict visibility and
+leave the launcher in `auto` mode:
+
+```bash
+CUDA_VISIBLE_DEVICES=<reserved-physical-gpu> \
+  GPU_IDS=auto SEEDS=4 VARIANTS=baseline \
+  bash script/run_optimization_long.sh
 ```
 
 Outputs are written under `log_dir` (set in config; default `./`) as:

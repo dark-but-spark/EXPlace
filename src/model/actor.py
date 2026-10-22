@@ -29,18 +29,29 @@ class Actor(nn.Module):
             cnn_res, coarse_res = self._forward_sequential(x)
         cnn_res = self.merge(th.cat([cnn_res, coarse_res], dim=1))
 
-        # decode with hard position mask
-        position_mask = self.state_parsing.state2position_mask(x)
-        soft_mask = self.state_parsing.state2soft_mask(x)
+        return self._decode_action_probs(cnn_res, x)
+
+    def _decode_action_probs(self, cnn_res, state):
+        # Decode with hard position and learned soft masks.
+        position_mask = self.state_parsing.state2position_mask(state)
+        soft_mask = self.state_parsing.state2soft_mask(state)
         mask_min = soft_mask.min(dim=-1, keepdim=True).values + self.args.soft_coefficient
-        soft_mask = soft_mask.le(mask_min).logical_not().double()
+        soft_mask = soft_mask.le(mask_min).logical_not()
 
         position_mask = position_mask.flatten(start_dim=1, end_dim=2)
         x = cnn_res.reshape(-1, self.grid * self.grid)
 
-        x = th.where(position_mask.double() + soft_mask >= 1.0, -1.0e10, x.double())
+        if getattr(self.args, 'policy_mask_fp32', False):
+            # Keep mask arithmetic and softmax in FP32. In particular, -1e10
+            # is not representable in FP16 and would fail in torch.where.
+            position_mask = position_mask.to(dtype=th.float32)
+            soft_mask = soft_mask.to(dtype=th.float32)
+            x = x.float()
+            x = th.where(position_mask + soft_mask >= 1.0, -1.0e10, x)
+        else:
+            x = th.where(position_mask.double() + soft_mask.double() >= 1.0,
+                         -1.0e10, x.double())
         x = self.softmax(x)
-
         return x
 
     def _forward_parallel(self, x):

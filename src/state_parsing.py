@@ -48,6 +48,7 @@ class StateParsing:
         self.args = args
         self.grid = args.grid
         self.g2 = self.grid * self.grid
+        self._reward_coeff_cache = {}
         self.set_reward_weights(args.trade_off_coeff)
 
     def set_reward_weights(self, weights):
@@ -56,6 +57,19 @@ class StateParsing:
         if len(weights) != expected:
             raise ValueError(f"expected {expected} reward weights, got {len(weights)}")
         self.reward_weights = np.asarray(weights, dtype=np.float64).copy()
+        # Reward weights can change between physical-evaluation updates.  Any
+        # device/dtype copies made for the actor decoder must then be rebuilt.
+        self._reward_coeff_cache.clear()
+
+    def _reward_coeff_tensor(self, state):
+        dtype = state.dtype if getattr(self.args, 'policy_mask_fp32', False) else th.float64
+        key = (state.device.type, state.device.index, dtype)
+        coeff = self._reward_coeff_cache.get(key)
+        if coeff is None:
+            values = np.concatenate((self.reward_weights, np.array([10.0])))
+            coeff = th.as_tensor(values, dtype=dtype, device=state.device)
+            self._reward_coeff_cache[key] = coeff
+        return coeff
     
     def get_state(self,
         place_idx, 
@@ -138,14 +152,18 @@ class StateParsing:
     def state2soft_mask(self, state):
         canvas_num = 2 if self.args.prototype_flag else 1
         mask_num = (state.shape[1] - canvas_num * self.g2 - 3) // (self.g2 * 2)
-        trade_off_coeff = np.concatenate((self.reward_weights, np.array([10.0])))
+        # The historical decoder used float64 coefficients.  Keep that
+        # default for baseline runs, but let GPU/AMP experiments use the
+        # policy input dtype and broadcast one coefficient per mask instead
+        # of materializing a [batch, mask, grid^2] repeat tensor.
+        trade_off_coeff = self._reward_coeff_tensor(state)
         if len(state.shape) == 1:
-            trade_off_coeff = th.tensor(trade_off_coeff)[:, None].repeat(1, self.g2).to(state.device)
+            trade_off_coeff = trade_off_coeff.view(mask_num, 1)
             masks = state[1 + self.g2 * canvas_num : 1 + self.g2 * (mask_num + canvas_num)].reshape(mask_num, self.g2)
             soft_mask = th.sum(masks * trade_off_coeff, dim=0)
             return soft_mask
         elif len(state.shape) == 2:
-            trade_off_coeff = th.tensor(trade_off_coeff)[None, :, None].repeat(state.shape[0], 1, self.g2).to(state.device)
+            trade_off_coeff = trade_off_coeff.view(1, mask_num, 1)
             masks = state[:, 1 + self.g2 * canvas_num : 1 + self.g2 * (mask_num + canvas_num)].reshape(-1, mask_num, self.g2)
             soft_mask = th.sum(masks * trade_off_coeff, dim=1)
             return soft_mask

@@ -34,6 +34,21 @@ class PerformanceDefaultsTest(unittest.TestCase):
         self.assertTrue(config["batch_device_copy"])
         self.assertFalse(config["use_dmp_for_evaluation"])
 
+    def test_gpu_long_config_uses_cuda_policy_decode(self):
+        with (ROOT / "config" / "optimization_gpu_long.yaml").open() as handle:
+            config = yaml.safe_load(handle)
+        self.assertTrue(config["use_cuda"])
+        self.assertEqual(config["worker_policy_device"], "cuda")
+        self.assertTrue(config["policy_mask_fp32"])
+
+    def test_physical_quick_config_runs_evaluation_during_smoke(self):
+        with (ROOT / "config" / "compare_physical_quick.yaml").open() as handle:
+            config = yaml.safe_load(handle)
+        self.assertTrue(config["use_dmp_for_evaluation"])
+        self.assertTrue(config["use_timer_for_evaluation"])
+        self.assertEqual(config["episode"] % config["rollout_batch_size"], 0)
+        self.assertLessEqual(config["evaluation_interval"], config["episode"])
+
 
 if __name__ == "__main__":
     unittest.main()

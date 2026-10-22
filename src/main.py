@@ -29,11 +29,78 @@ from env_utils import init_ray_envs, create_single_env
 from experiments.adaptive_reward import build_reward_weight_learner
 from problem_instance import ProblemInstance
 from async_evaluator import AsyncPhysicalEvaluator
-from utils.log_utils import save_runtime, save_best_metrics, save_eval_metrics, save_reward_weights
+from utils.log_utils import (
+    save_runtime, save_best_metrics, save_eval_metrics, save_reward_weights,
+    save_physical_evaluation,
+)
 
 CONFIG_DIR = os.path.join(ROOT_DIR, "config")
 
 Transition = namedtuple('Transition',['state', 'action', 'reward', 'action_log_prob', 'done'])
+
+
+def resolve_device(gpu, use_cuda):
+    """Resolve a torch device without changing the caller's GPU environment.
+
+    ``CUDA_VISIBLE_DEVICES`` changes physical GPU ids into logical ids.  A
+    launcher may therefore pass a physical id (for example ``1``) while a
+    process restricted to that GPU must use ``cuda:0``.  The old startup path
+    rewrote ``CUDA_VISIBLE_DEVICES`` from the YAML default, which made an
+    inherited scheduler allocation easy to accidentally override.
+    """
+    if not use_cuda or not th.cuda.is_available():
+        return 'cpu'
+
+    visible = os.environ.get('CUDA_VISIBLE_DEVICES')
+    if visible:
+        visible_ids = [item.strip() for item in visible.split(',') if item.strip()]
+        if gpu is None:
+            return 'cuda'
+        gpu_text = str(gpu)
+        if gpu_text in visible_ids:
+            return f'cuda:{visible_ids.index(gpu_text)}'
+        # When the caller supplies a logical id, preserve it as long as it is
+        # valid in the restricted process.  This supports CUDA_VISIBLE_DEVICES
+        # values such as ``0,2`` without assuming physical ids are contiguous.
+        logical_id = int(gpu)
+        if 0 <= logical_id < len(visible_ids):
+            return f'cuda:{logical_id}'
+        raise ValueError(
+            f"GPU {gpu} is not available through CUDA_VISIBLE_DEVICES={visible}"
+        )
+
+    if gpu is None:
+        return 'cuda'
+    gpu_id = int(gpu)
+    device_count = th.cuda.device_count()
+    if gpu_id < 0 or gpu_id >= device_count:
+        raise ValueError(f"GPU {gpu_id} requested, but PyTorch sees {device_count} CUDA device(s)")
+    return f'cuda:{gpu_id}'
+
+
+def print_device_diagnostics(args):
+    """Print enough runtime state to distinguish logical and physical GPUs."""
+    visible = os.environ.get('CUDA_VISIBLE_DEVICES', '<unset>')
+    print(f'CUDA_VISIBLE_DEVICES: {visible}')
+    print(f'worker_policy_device: {getattr(args, "worker_policy_device", "cpu")}')
+    if args.device == 'cpu' or not th.cuda.is_available():
+        print('CUDA runtime diagnostics: unavailable')
+        return
+    logical_index = th.device(args.device).index
+    if logical_index is None:
+        logical_index = th.cuda.current_device()
+    try:
+        th.cuda.set_device(logical_index)
+        free_bytes, total_bytes = th.cuda.mem_get_info(logical_index)
+        print(
+            'CUDA runtime diagnostics: '
+            f'logical_device={logical_index} '
+            f'name={th.cuda.get_device_name(logical_index)} '
+            f'free_mib={free_bytes / 2**20:.0f} '
+            f'total_mib={total_bytes / 2**20:.0f}'
+        )
+    except Exception as error:
+        print(f'CUDA runtime diagnostics unavailable: {error}')
 
 
 def process_args():
@@ -43,7 +110,7 @@ def process_args():
     parser.add_argument('--config', type=str, default='or', help='Config file name (without .yaml)')
     parser.add_argument('--benchmark', type=str, required=True, help='Design benchmark name')
     parser.add_argument('--seed', type=int, help='Random seed (overrides config)')
-    parser.add_argument('--gpu', type=int, help='GPU device ID (overrides config)')
+    parser.add_argument('--gpu', type=int, help='GPU device ID (overrides config; otherwise use inherited allocation)')
     parser.add_argument('--test', action='store_true', default=False, help='Enable test mode')
     parser.add_argument('--debug', action='store_true', default=False, help='Enable debug mode')
     parser.add_argument('--model_path', type=str, default=None, help='Path to trained model for test (e.g. best_model_ep1500.pt)')
@@ -57,7 +124,7 @@ def process_args():
     for option in (
         'compact_transition', 'worker_rollout', 'mixed_precision',
         'async_evaluation', 'mask_cache', 'vectorized_occupancy',
-        'batch_device_copy',
+        'batch_device_copy', 'policy_mask_fp32',
     ):
         parser.add_argument(
             f'--{option.replace("_", "-")}',
@@ -98,7 +165,7 @@ def process_args():
     for option in (
         'compact_transition', 'worker_rollout', 'mixed_precision',
         'async_evaluation', 'mask_cache', 'vectorized_occupancy',
-        'batch_device_copy',
+        'batch_device_copy', 'policy_mask_fp32',
     ):
         value = getattr(cmd_args, option)
         if value is not None:
@@ -122,6 +189,9 @@ def process_args():
     config_dict.setdefault('mask_cache', True)
     config_dict.setdefault('vectorized_occupancy', True)
     config_dict.setdefault('batch_device_copy', True)
+    # Keep the historical FP64 mask decoder unless an optimization config
+    # explicitly opts into the CUDA-friendly FP32 boundary.
+    config_dict.setdefault('policy_mask_fp32', False)
     if config_dict['amp_dtype'] not in ('float16', 'bfloat16'):
         raise ValueError("amp_dtype must be 'float16' or 'bfloat16'")
     if not config_dict.get('used_masks') or config_dict['used_masks'][-1] != 'pos':
@@ -140,13 +210,11 @@ def process_args():
     args.design_name = args.benchmark
     print(f"benchmark:\t{args.design_name}")
     
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
-    if th.cuda.is_available() and args.use_cuda:
-        args.device = 'cuda'
-    else:
+    args.device = resolve_device(getattr(args, 'gpu', None), args.use_cuda)
+    if args.device == 'cpu':
         args.use_cuda = False
-        args.device = 'cpu'
     print(f'using device: {args.device}')
+    print_device_diagnostics(args)
     
     args.unique_token = f"seed_{args.seed}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
     assert args.grid % 32 == 0, 'grid should be a multiple of 32'
@@ -259,6 +327,28 @@ def main(args, config_path):
     pending_context = None
     last_metrics = (0.0, 0.0, 0.0)
 
+    def update_reward_weights(trajectory, metrics, eval_episode):
+        """Observe the evaluated placement in both sync and async modes."""
+        if reward_weight_learner is None:
+            return
+        gp_hpwl, tns, wns = metrics
+        weight_update = reward_weight_learner.observe(
+            trajectory, gp_hpwl=gp_hpwl, tns=tns, wns=wns
+        )
+        new_weights = [weight_update.weights[name] for name in args.used_masks[:-1]]
+        sync_reward_weights(args, agent, test_env, ray_envs, new_weights)
+        if not args.debug:
+            save_reward_weights(
+                reward_weights_path, episode=eval_episode,
+                weights=weight_update.weights,
+                ppa_penalty=weight_update.ppa_penalty,
+                correlations=weight_update.correlations,
+                updated=weight_update.updated,
+            )
+        for name, value in weight_update.weights.items():
+            writer.add_scalar(f'reward_weight/{name}', value, eval_episode)
+        print(f"Adaptive reward weights: {weight_update.weights}")
+
     def consume_async_eval(block=False):
         nonlocal pending_eval, pending_context, last_metrics, best_tns, best_gp_hpwl
         if pending_eval is None:
@@ -273,8 +363,22 @@ def main(args, config_path):
         pending_eval = None
         pending_context = None
         gp_hpwl, tns, wns = result['metrics']
-        last_metrics = (gp_hpwl, tns, wns)
         eval_episode = result['episode']
+        valid = bool(result.get('valid', True))
+        failure_reason = result.get('failure_reason', '')
+        if not args.debug and context.get('kind') == 'periodic':
+            save_physical_evaluation(
+                os.path.join(args.log_dir, 'physical_evaluations.csv'),
+                eval_episode, 'periodic', gp_hpwl, tns, wns,
+                valid=valid, failure_reason=failure_reason,
+            )
+        if not valid:
+            print(
+                f"Physical evaluation rejected at episode {eval_episode}: "
+                f"{failure_reason or 'invalid placement'}"
+            )
+            return True
+        last_metrics = (gp_hpwl, tns, wns)
         trajectory = context['trajectory']
         if context.get('kind') == 'best_reward':
             ray.get(async_evaluator.save_placement.remote(os.path.join(args.placement_dir, 'best_reward.def')))
@@ -299,23 +403,7 @@ def main(args, config_path):
                               context['reward_info'], context['actor_loss'], context['critic_loss'])
             print(f"Best GP-HPWL updated - GP-HPWL: {gp_hpwl}, TNS: {tns}, WNS: {wns}")
         agent.train()
-        if reward_weight_learner is not None:
-            weight_update = reward_weight_learner.observe(
-                trajectory, gp_hpwl=gp_hpwl, tns=tns, wns=wns
-            )
-            new_weights = [weight_update.weights[name] for name in args.used_masks[:-1]]
-            sync_reward_weights(args, agent, test_env, ray_envs, new_weights)
-            if not args.debug:
-                save_reward_weights(
-                    reward_weights_path, episode=eval_episode,
-                    weights=weight_update.weights,
-                    ppa_penalty=weight_update.ppa_penalty,
-                    correlations=weight_update.correlations,
-                    updated=weight_update.updated,
-                )
-            for name, value in weight_update.weights.items():
-                writer.add_scalar(f'reward_weight/{name}', value, eval_episode)
-            print(f"Adaptive reward weights: {weight_update.weights}")
+        update_reward_weights(trajectory, last_metrics, eval_episode)
         return True
 
     for batch_idx in range(1, num_batches + 1):
@@ -354,20 +442,39 @@ def main(args, config_path):
             else:
                 trajectory = inference(args, model_path=None, agent=agent, test_env=test_env)
                 gp_hpwl, tns, wns = test_problem.evaluate(trajectory['macro_pos'])
-                last_metrics = (gp_hpwl, tns, wns)
-                if args.use_timer_for_evaluation and tns > best_tns:
+                valid_value = getattr(test_problem, 'last_evaluation_valid', True)
+                valid = valid_value if isinstance(valid_value, bool) else True
+                reason_value = getattr(test_problem, 'last_evaluation_failure', '')
+                failure_reason = reason_value if isinstance(reason_value, str) else ''
+                if not args.debug:
+                    save_physical_evaluation(
+                        os.path.join(args.log_dir, 'physical_evaluations.csv'),
+                        episode_counter, 'periodic', gp_hpwl, tns, wns,
+                        valid=valid, failure_reason=failure_reason,
+                    )
+                if not valid:
+                    print(
+                        f"Physical evaluation rejected at episode {episode_counter}: "
+                        f"{failure_reason or 'invalid placement'}"
+                    )
+                    gp_hpwl, tns, wns = last_metrics
+                else:
+                    last_metrics = (gp_hpwl, tns, wns)
+                if valid and args.use_timer_for_evaluation and tns > best_tns:
                     best_tns = tns
                     th.save(trajectory['macro_pos'], os.path.join(args.placement_dir, 'best_tns_macro_pos.pt'))
                     test_problem.save_placement(os.path.join(args.placement_dir, 'best_tns.def'))
                     test_problem.plot(gp_hpwl, os.path.join(args.visualization_dir, 'best_tns.png'))
                     agent.save_model(episode=episode_counter, path=args.model_dir, filename='best_tns_model.pt')
-                if gp_hpwl < best_gp_hpwl:
+                if valid and gp_hpwl < best_gp_hpwl:
                     best_gp_hpwl = gp_hpwl
                     th.save(trajectory['macro_pos'], os.path.join(args.placement_dir, 'best_gp_hpwl_macro_pos.pt'))
                     test_problem.save_placement(os.path.join(args.placement_dir, 'best_gp_hpwl.def'))
                     test_problem.plot(gp_hpwl, os.path.join(args.visualization_dir, 'best_gp_hpwl.png'))
                     agent.save_model(episode=episode_counter, path=args.model_dir, filename='best_gp_hpwl_model.pt')
                 agent.train()
+                if valid:
+                    update_reward_weights(trajectory, last_metrics, episode_counter)
 
         if not args.debug:
             save_eval_metrics(
@@ -414,8 +521,9 @@ def main(args, config_path):
                     pending_eval = async_evaluator.evaluate.remote(episode_counter, macro_pos)
                 elif async_evaluator is None:
                     gp_hpwl, _, _ = test_problem.evaluate(macro_pos)
-                    test_problem.save_placement(os.path.join(args.placement_dir, 'best_reward.def'))
-                    test_problem.plot(gp_hpwl, os.path.join(args.visualization_dir, 'best_reward.png'))
+                    if getattr(test_problem, 'last_evaluation_valid', True):
+                        test_problem.save_placement(os.path.join(args.placement_dir, 'best_reward.def'))
+                        test_problem.plot(gp_hpwl, os.path.join(args.visualization_dir, 'best_reward.png'))
 
         # Current time step model checkpoint (single file, overwrite each batch)
         if not args.debug:
@@ -625,7 +733,7 @@ def inference(args, model_path=None, agent=None, test_env=None):
         print(f"Starting model test: {model_path}")
         args.log_dir = os.path.dirname(model_path)
         # Initialize agent and load model
-        agent = PPOAgent(args=args)
+        agent = PPOAgent(args=args, inference_only=True)
         agent.load_model(model_path)
         test_problem = ProblemInstance(args, args.benchmark, init=False)
     else:
@@ -649,13 +757,19 @@ def inference(args, model_path=None, agent=None, test_env=None):
         
         if model_path is not None and test_problem is not None:
             gp_hpwl, tns, wns = test_problem.evaluate(reward_info['macro_pos'])
-            test_problem.save_placement(os.path.join(args.log_dir, 'test_dmp.def'))
-            test_problem.plot(gp_hpwl, os.path.join(args.log_dir, 'test_dmp.png'))
-            print(f"Timing results - GP_HPWL: {gp_hpwl}, TNS: {tns}, WNS: {wns}")
-            # log timing results
-            log_file = "rl_logs/test_results.csv"
-            with open(log_file, 'a') as f:
-                f.write(f"{args.benchmark}, {gp_hpwl}, {tns}, {wns}\n")
+            if getattr(test_problem, 'last_evaluation_valid', True):
+                test_problem.save_placement(os.path.join(args.log_dir, 'test_dmp.def'))
+                test_problem.plot(gp_hpwl, os.path.join(args.log_dir, 'test_dmp.png'))
+                print(f"Timing results - GP_HPWL: {gp_hpwl}, TNS: {tns}, WNS: {wns}")
+                # log timing results only for a valid physical placement.
+                log_file = "rl_logs/test_results.csv"
+                with open(log_file, 'a') as f:
+                    f.write(f"{args.benchmark}, {gp_hpwl}, {tns}, {wns}\n")
+            else:
+                print(
+                    "Test physical evaluation rejected: "
+                    f"{getattr(test_problem, 'last_evaluation_failure', 'invalid placement')}"
+                )
         
         env.visualize_placement(10000, test_mode=True)
     

@@ -6,16 +6,79 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 PYTHON_BIN="${PYTHON_BIN:-}"
+CUDA_HOME="${CUDA_HOME:-/data0/cjy_cxsj/cuda}"
+NVCC_BIN="${NVCC_BIN:-${CUDA_HOME}/bin/nvcc}"
 CONFIG="${CONFIG:-adaptive_global}"
 BENCHMARKS_TEXT="${BENCHMARKS:-superblue18}"
 SEEDS_TEXT="${SEEDS:-3}"
-GPU_IDS_TEXT="${GPU_IDS:-0}"
+# GPU_IDS is supplied by the scheduler/user. Auto mode inherits the current
+# CUDA allocation and keeps the matrix single-worker to avoid GPU contention.
+GPU_IDS_TEXT="${GPU_IDS:-}"
 VARIANTS_TEXT="${VARIANTS:-fixed_step fixed_global adaptive_step adaptive_global}"
 DRY_RUN="${DRY_RUN:-0}"
 RESUME="${RESUME:-1}"
 FAIL_FAST="${FAIL_FAST:-0}"
 ALLOW_CPU="${ALLOW_CPU:-0}"
 REQUIRE_PREPROCESSED="${REQUIRE_PREPROCESSED:-1}"
+GPU_MIN_FREE_MIB="${GPU_MIN_FREE_MIB:-4096}"
+GPU_MAX_UTILIZATION="${GPU_MAX_UTILIZATION:-80}"
+GPU_WAIT_SECONDS="${GPU_WAIT_SECONDS:-0}"
+GPU_POLL_SECONDS="${GPU_POLL_SECONDS:-30}"
+TASK_ORDER="${TASK_ORDER:-variant}"
+# Legacy mode is the reproducible reward-ablation default. Optimized mode keeps
+# the config's performance paths but still disables async evaluation by default.
+EXECUTION_MODE="${EXECUTION_MODE:-legacy}"
+ASYNC_EVALUATION="${ASYNC_EVALUATION:-0}"
+
+case "${EXECUTION_MODE}" in
+    legacy|optimized) ;;
+    *) echo "EXECUTION_MODE must be legacy or optimized" >&2; exit 2 ;;
+esac
+case "${ASYNC_EVALUATION}" in
+    0|1) ;;
+    *) echo "ASYNC_EVALUATION must be 0 or 1" >&2; exit 2 ;;
+esac
+if [[ "${EXECUTION_MODE}" == "legacy" && "${ASYNC_EVALUATION}" == "1" ]]; then
+    echo "ASYNC_EVALUATION=1 is incompatible with EXECUTION_MODE=legacy" >&2
+    exit 2
+fi
+
+if [[ ! -x "${NVCC_BIN}" ]]; then
+    echo "CUDA 11.8 nvcc not found: ${NVCC_BIN}" >&2
+    exit 2
+fi
+export CUDA_HOME NVCC_BIN
+export PATH="${CUDA_HOME}/bin:${PATH}"
+export LD_LIBRARY_PATH="${CUDA_HOME}/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+
+select_idle_gpu() {
+    local selected elapsed=0
+    command -v nvidia-smi >/dev/null 2>&1 || {
+        echo "GPU_IDS=auto requires nvidia-smi" >&2
+        return 2
+    }
+    while :; do
+        selected="$(nvidia-smi --query-gpu=index,memory.free,utilization.gpu \
+            --format=csv,noheader,nounits 2>/dev/null | \
+            awk -F', *' -v min_free="${GPU_MIN_FREE_MIB}" \
+                -v max_util="${GPU_MAX_UTILIZATION}" \
+                '$2 >= min_free && $3 <= max_util {
+                    if ($2 > best_free) { best_free=$2; best=$1 }
+                }
+                END { if (best != "") print best }')"
+        if [[ -n "${selected}" ]]; then
+            printf '%s\n' "${selected}"
+            return 0
+        fi
+        if (( elapsed >= GPU_WAIT_SECONDS )); then
+            echo "No idle GPU meets GPU_MIN_FREE_MIB=${GPU_MIN_FREE_MIB}, GPU_MAX_UTILIZATION=${GPU_MAX_UTILIZATION}" >&2
+            return 1
+        fi
+        echo "Waiting for an idle GPU (${elapsed}/${GPU_WAIT_SECONDS}s)" >&2
+        sleep "${GPU_POLL_SECONDS}"
+        elapsed=$((elapsed + GPU_POLL_SECONDS))
+    done
+}
 
 timestamp="$(date -u +%Y%m%d_%H%M%S)"
 RUN_ROOT="${RUN_ROOT:-${PROJECT_ROOT}/long_runs/${timestamp}}"
@@ -25,7 +88,12 @@ fi
 
 read -r -a BENCHMARKS_ARRAY <<< "${BENCHMARKS_TEXT}"
 read -r -a SEEDS_ARRAY <<< "${SEEDS_TEXT}"
-read -r -a GPU_IDS_ARRAY <<< "${GPU_IDS_TEXT}"
+if [[ -n "${GPU_IDS_TEXT}" ]]; then
+    read -r -a GPU_IDS_ARRAY <<< "${GPU_IDS_TEXT}"
+else
+    GPU_IDS_ARRAY=(auto)
+    GPU_IDS_TEXT=auto
+fi
 read -r -a VARIANTS_ARRAY <<< "${VARIANTS_TEXT}"
 
 if (( ${#BENCHMARKS_ARRAY[@]} == 0 || ${#SEEDS_ARRAY[@]} == 0 || ${#GPU_IDS_ARRAY[@]} == 0 || ${#VARIANTS_ARRAY[@]} == 0 )); then
@@ -42,8 +110,11 @@ done
 
 declare -A SEEN_GPUS=()
 for gpu_id in "${GPU_IDS_ARRAY[@]}"; do
+    if [[ "${gpu_id}" == auto ]]; then
+        continue
+    fi
     if [[ ! "${gpu_id}" =~ ^[0-9]+$ ]]; then
-        echo "GPU_IDS must contain non-negative integer IDs: ${gpu_id}" >&2
+        echo "GPU_IDS must contain non-negative integer IDs or auto: ${gpu_id}" >&2
         exit 2
     fi
     if [[ -n "${SEEN_GPUS[${gpu_id}]:-}" ]]; then
@@ -112,6 +183,7 @@ done
 if [[ "${DRY_RUN}" != "1" && "${ALLOW_CPU}" != "1" ]]; then
     cuda_count="$("${PYTHON_BIN}" -c 'import torch; print(torch.cuda.device_count() if torch.cuda.is_available() else 0)')"
     for gpu_id in "${GPU_IDS_ARRAY[@]}"; do
+        [[ "${gpu_id}" == auto ]] && continue
         if (( gpu_id >= cuda_count )); then
             echo "GPU ${gpu_id} requested, but PyTorch sees ${cuda_count} CUDA device(s)." >&2
             echo "Run inside the GPU container or set ALLOW_CPU=1 intentionally." >&2
@@ -125,6 +197,15 @@ MASTER_LOG="${RUN_ROOT}/master.log"
 SUMMARY_CSV="${RUN_ROOT}/summary.csv"
 PLAN_TSV="${RUN_ROOT}/plan.tsv"
 SUMMARY_LOCK="${RUN_ROOT}/.summary.lock"
+
+# Keep toolchain and worktree evidence beside every matrix, including dry-runs.
+# A run without this file is not a reproducible formal result.
+if [[ ! -x "${PROJECT_ROOT}/script/capture_run_metadata.sh" ]]; then
+    echo "Metadata capture script is missing or not executable" >&2
+    exit 2
+fi
+PYTHON_BIN="${PYTHON_BIN}" \
+    "${PROJECT_ROOT}/script/capture_run_metadata.sh" "${RUN_ROOT}/run_metadata.txt" >/dev/null
 
 if [[ ! -f "${SUMMARY_CSV}" ]]; then
     echo "variant,benchmark,seed,gpu,status,exit_code,duration_seconds,task_dir" > "${SUMMARY_CSV}"
@@ -148,22 +229,45 @@ append_summary() {
 
 TASKS=()
 task_id=0
-for variant in "${VARIANTS_ARRAY[@]}"; do
-    for benchmark in "${BENCHMARKS_ARRAY[@]}"; do
-        for seed in "${SEEDS_ARRAY[@]}"; do
-            gpu_index=$((task_id % ${#GPU_IDS_ARRAY[@]}))
-            gpu_id="${GPU_IDS_ARRAY[${gpu_index}]}"
-            task_dir="${RUN_ROOT}/${variant}/${benchmark}/seed_${seed}"
-            TASKS+=("${variant}|${benchmark}|${seed}|${gpu_id}|${task_dir}")
-            echo -e "${task_id}\t${variant}\t${benchmark}\t${seed}\t${gpu_id}\t${task_dir}" >> "${PLAN_TSV}"
-            task_id=$((task_id + 1))
+case "${TASK_ORDER}" in
+    variant)
+        for variant in "${VARIANTS_ARRAY[@]}"; do
+            for benchmark in "${BENCHMARKS_ARRAY[@]}"; do
+                for seed in "${SEEDS_ARRAY[@]}"; do
+                    gpu_index=$((task_id % ${#GPU_IDS_ARRAY[@]}))
+                    gpu_id="${GPU_IDS_ARRAY[${gpu_index}]}"
+                    task_dir="${RUN_ROOT}/${variant}/${benchmark}/seed_${seed}"
+                    TASKS+=("${variant}|${benchmark}|${seed}|${gpu_id}|${task_dir}")
+                    echo -e "${task_id}\t${variant}\t${benchmark}\t${seed}\t${gpu_id}\t${task_dir}" >> "${PLAN_TSV}"
+                    task_id=$((task_id + 1))
+                done
+            done
         done
-    done
-done
+        ;;
+    seed_interleaved)
+        for benchmark in "${BENCHMARKS_ARRAY[@]}"; do
+            for seed in "${SEEDS_ARRAY[@]}"; do
+                for variant in "${VARIANTS_ARRAY[@]}"; do
+                    gpu_index=$((task_id % ${#GPU_IDS_ARRAY[@]}))
+                    gpu_id="${GPU_IDS_ARRAY[${gpu_index}]}"
+                    task_dir="${RUN_ROOT}/${variant}/${benchmark}/seed_${seed}"
+                    TASKS+=("${variant}|${benchmark}|${seed}|${gpu_id}|${task_dir}")
+                    echo -e "${task_id}\t${variant}\t${benchmark}\t${seed}\t${gpu_id}\t${task_dir}" >> "${PLAN_TSV}"
+                    task_id=$((task_id + 1))
+                done
+            done
+        done
+        ;;
+    *)
+        echo "TASK_ORDER must be variant or seed_interleaved" >&2
+        exit 2
+        ;;
+esac
 
 run_task() {
     local task="$1"
     local variant benchmark seed gpu_id task_dir
+    local task_gpu
     local reward_weight_mode reward_granularity
     local start_epoch end_epoch duration rc status
     IFS='|' read -r variant benchmark seed gpu_id task_dir <<< "${task}"
@@ -176,16 +280,51 @@ run_task() {
         return 0
     fi
 
+    task_gpu="${gpu_id}"
+    if [[ "${gpu_id}" == auto && "${DRY_RUN}" != "1" ]]; then
+        if task_gpu="$(select_idle_gpu)"; then
+            :
+        else
+            rc=$?
+            status="FAILED"
+            printf 'exit_code=%s\nreason=no_idle_gpu\n' "${rc}" > "${task_dir}/${status}"
+            append_summary "${variant},${benchmark},${seed},auto,${status},${rc},0,${task_dir}"
+            log_message "FAILED ${variant} ${benchmark} seed=${seed}: no idle GPU"
+            return 1
+        fi
+        log_message "Selected idle GPU ${task_gpu} for ${variant} ${benchmark} seed=${seed}"
+    fi
+
     local -a command=(
         "${PYTHON_BIN}" -m src.main
         --benchmark "${benchmark}"
         --config "${CONFIG}"
         --seed "${seed}"
-        --gpu "${gpu_id}"
         --reward-weight-mode "${reward_weight_mode}"
         --reward-granularity "${reward_granularity}"
         --log-dir "${task_dir}/output"
     )
+    if [[ "${EXECUTION_MODE}" == "legacy" ]]; then
+        command+=(
+            --no-compact-transition
+            --no-worker-rollout
+            --no-mask-cache
+            --no-vectorized-occupancy
+            --no-batch-device-copy
+            --no-mixed-precision
+            --no-async-evaluation
+            --no-policy-mask-fp32
+        )
+    else
+        if [[ "${ASYNC_EVALUATION}" == "1" ]]; then
+            command+=(--async-evaluation)
+        else
+            command+=(--no-async-evaluation)
+        fi
+    fi
+    if [[ "${task_gpu}" != auto ]]; then
+        command+=(--gpu "${task_gpu}")
+    fi
 
     {
         printf '#!/usr/bin/env bash\n'
@@ -209,7 +348,12 @@ run_task() {
 
     if (
         cd "${PROJECT_ROOT}"
-        MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" PYTHONUNBUFFERED=1 "${command[@]}"
+        if [[ "${gpu_id}" == auto ]]; then
+            CUDA_VISIBLE_DEVICES="${task_gpu}" \
+                MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" PYTHONUNBUFFERED=1 "${command[@]}"
+        else
+            MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" PYTHONUNBUFFERED=1 "${command[@]}"
+        fi
     ) > "${task_dir}/stdout.log" 2>&1; then
         rc=0
         status="SUCCESS"
@@ -223,8 +367,8 @@ run_task() {
     rm -f "${task_dir}/RUNNING"
     printf 'exit_code=%s\nduration_seconds=%s\nfinished_utc=%s\n' \
         "${rc}" "${duration}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${task_dir}/${status}"
-    append_summary "${variant},${benchmark},${seed},${gpu_id},${status},${rc},${duration},${task_dir}"
-    log_message "${status} gpu=${gpu_id} ${variant} ${benchmark} seed=${seed} duration=${duration}s rc=${rc}"
+    append_summary "${variant},${benchmark},${seed},${task_gpu},${status},${rc},${duration},${task_dir}"
+    log_message "${status} gpu=${task_gpu} ${variant} ${benchmark} seed=${seed} duration=${duration}s rc=${rc}"
     return "${rc}"
 }
 
@@ -244,7 +388,7 @@ worker() {
 }
 
 log_message "Matrix root: ${RUN_ROOT}"
-log_message "Tasks: ${#TASKS[@]}, GPUs: ${GPU_IDS_TEXT}, config: ${CONFIG}, python: ${PYTHON_BIN}, dry_run: ${DRY_RUN}, allow_cpu: ${ALLOW_CPU}"
+log_message "Tasks: ${#TASKS[@]}, order: ${TASK_ORDER}, execution_mode: ${EXECUTION_MODE}, async_evaluation: ${ASYNC_EVALUATION}, GPUs: ${GPU_IDS_TEXT}, config: ${CONFIG}, python: ${PYTHON_BIN}, dry_run: ${DRY_RUN}, allow_cpu: ${ALLOW_CPU}"
 
 if [[ "${DRY_RUN}" == "1" ]]; then
     for task in "${TASKS[@]}"; do

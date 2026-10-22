@@ -244,7 +244,97 @@ physical evaluation, not placement-quality results.
   an unconditional FP16 cast still changed its memory and numerical path.
   This made A/B wall-time ratios incomparable with the historical baseline.
 - Verification: `tests/test_batch_device_copy.py` covers both FP32 baseline
-  preservation and compact FP16 storage; full unittest suite is 26/26 passing.
+  preservation and compact FP16 storage; the current unittest suite is 30/30
+  passing.
 - Measurement: this is an experiment-validity correction, not a speedup claim.
   Re-run baseline/optimized pairs after the correction before publishing new
   component or wall-clock multipliers.
+
+## Phase 14: GPU allocation and AMP rerun readiness
+
+- Launchers no longer default to a physical GPU list. If `GPU_IDS` is unset,
+  they use `auto`, inherit `CUDA_VISIBLE_DEVICES`, and run one task at a time;
+  set `GPU_IDS="0 2"` only when those devices have been reserved explicitly.
+- `main.process_args` no longer rewrites `CUDA_VISIBLE_DEVICES`. Explicit GPU
+  ids are mapped to the logical device visible inside the process, so a job
+  launched with `CUDA_VISIBLE_DEVICES=1` uses `cuda:0` internally without
+  stealing or remapping another user's allocation.
+- AMP now keeps categorical distributions and value losses in FP32 at their
+  numerical boundaries. CNN/critic forward kernels remain autocast, while
+  the opt-in BF16 path avoids `smooth_l1_backward_cuda`; AMP-disabled runs do
+  not add casts and retain the baseline FP32 transition path.
+- The historical seed-4 failures remain resource failures (GPU OOM during
+  model construction/update), not seed-specific placement failures. A rerun
+  should reserve a free device and use, for example:
+
+  ```bash
+  CUDA_VISIBLE_DEVICES=<reserved-physical-gpu> \
+    GPU_IDS=auto SEEDS=4 VARIANTS=baseline \
+    bash script/run_optimization_long.sh
+  ```
+
+  Extend `VARIANTS` after the baseline has completed on the same allocation.
+
+- The host CUDA toolchain is CUDA 11.8 at `/data0/cjy_cxsj/cuda`, matching the
+  reference `/usr/bin/python3` PyTorch `2.0.0+cu118`. Long-run launchers now
+  validate `nvcc` at that location and export `CUDA_HOME`, `PATH`, and
+  `LD_LIBRARY_PATH`; `script/activate_cuda118.sh` is also available for manual
+  commands.
+
+## Phase 15: rollout inference and normalization overhead
+
+- Worker/driver action selection now uses `torch.inference_mode()` so rollout
+  forward passes do not maintain autograd version counters or view metadata.
+- Environment mask normalization uses NumPy array copies and one pair of
+  extrema scans instead of recursive `deepcopy` and repeated full-array
+  scans. Values and normalization semantics are unchanged.
+- These are CPU rollout overhead reductions, not claims of higher GPU
+  utilization. Re-run the GPU short test and compare rollout time before
+  enabling a new long-run result.
+
+## Phase 16: CUDA policy-mask decode
+
+- The historical actor decoder promoted the hard/soft mask and logits to
+  float64 before `where`/`softmax`. This is retained for baseline configs.
+- GPU optimization configs now opt into `policy_mask_fp32`: coefficients are
+  broadcast over the mask dimension, the mask boundary stays in the policy
+  dtype, and logits are not promoted to FP64. This removes a large temporary
+  repeat tensor and avoids FP64 CUDA kernels in the action decoder.
+- `tests/test_policy_mask.py` checks FP32-vs-reference values and batch
+  broadcasting. This is a throughput optimization; rerun matched short tests
+  and compare action/reward traces before using it in a formal result.
+
+## Phase 17: complete long-run matrix coverage
+
+- The long-run harness now includes both `amp_fp16` and `amp_bf16`; each AMP
+  variant keeps the same compact/worker/mask/PPO paths and only changes the
+  autocast dtype.
+- The RL matrix is `baseline compact worker masks ppo optimized amp_fp16
+  amp_bf16`. The physical matrix remains a separate `baseline async_off
+  async_on` comparison so DREAMPlace/OpenTimer cost is not mixed into RL-only
+  throughput results.
+- A dry-run generated all 24 RL task commands (3 seeds x 8 variants) and all
+  physical comparison commands. Actual execution is pending a live NVIDIA
+  driver and Ray GCS runtime on the target node.
+
+## Phase 18: FP16 decode and controlled evaluation logging
+
+- Fixed the FP16 AMP failure: the optimized actor decoder now promotes logits
+  and masks to FP32 before applying the `-1e10` invalid-action sentinel and
+  softmax. This avoids the FP16 overflow while keeping AMP CNN kernels and
+  gradients active.
+- Added a regression test that feeds FP16 logits through the decoder and
+  verifies finite normalized probabilities and zero probability for masked
+  actions.
+- `run_optimization_long.sh` now supports `TASK_ORDER=pair_alternating` for
+  adjacent matched baseline/optimized runs, reversing order on alternate
+  seeds, and `TASK_ORDER=seed_interleaved` for within-seed ablation matrices.
+- Physical evaluations are written to `physical_evaluations.csv` with the
+  source episode, independent of when an asynchronous result is consumed.
+  The summarizer prefers this aligned file over the training-loop metric
+  stream, which can otherwise associate delayed metrics with a later episode.
+- Verification: 36 unit tests pass; Python and shell syntax checks pass; both
+  task ordering modes pass dry-run generation. The current execution
+  environment has no NVIDIA driver (`nvidia-smi` cannot communicate), so GPU
+  reruns and DREAMPlace end-to-end checks remain pending on the allocated GPU
+  host.

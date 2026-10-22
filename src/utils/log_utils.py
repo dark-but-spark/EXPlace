@@ -14,6 +14,54 @@ def save_runtime(path, episode, state_transition_time, training_time):
         f.write(f"{episode},{state_transition_time:.4f},{training_time:.4f}\n")
 
 
+def save_physical_evaluation(
+    path, episode, kind, gp_hpwl, tns, wns, valid=True, failure_reason=""
+):
+    """Record physical results and whether the final placement is usable.
+
+    Invalid DREAMPlace output is retained for diagnosis, but callers must not
+    use it as a best result or adaptive-reward observation.
+    """
+    fieldnames = [
+        'episode', 'kind', 'valid', 'failure_reason',
+        'gp_hpwl', 'tns', 'wns',
+    ]
+    file_exists = os.path.exists(path)
+    if file_exists:
+        # A failed task may be resumed from a run written before the validity
+        # columns existed. Migrate that header once before appending, keeping
+        # old observations as valid because they had no rejection signal.
+        with open(path, newline='') as handle:
+            reader = csv.DictReader(handle)
+            old_rows = list(reader)
+            old_fields = reader.fieldnames or []
+        if old_fields != fieldnames:
+            with open(path, 'w', newline='') as handle:
+                writer = csv.DictWriter(handle, fieldnames=fieldnames)
+                writer.writeheader()
+                for old_row in old_rows:
+                    row = {name: old_row.get(name, '') for name in fieldnames}
+                    row['valid'] = old_row.get('valid', '1') or '1'
+                    row['failure_reason'] = old_row.get('failure_reason', '')
+                    writer.writerow(row)
+    with open(path, 'a', newline='') as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=fieldnames,
+        )
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow({
+            'episode': int(episode),
+            'kind': kind,
+            'valid': int(bool(valid)),
+            'failure_reason': failure_reason,
+            'gp_hpwl': float(gp_hpwl),
+            'tns': float(tns),
+            'wns': float(wns),
+        })
+
+
 def save_best_metrics(path, episode, metric_type, tns, gp_hpwl, wns, reward_info, actor_loss, critic_loss):
     """Append one row when best TNS or best GP-HPWL is updated. metric_type is 'tns' or 'gp_hpwl'."""
     if not os.path.exists(path):

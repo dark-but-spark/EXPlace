@@ -899,15 +899,20 @@ class PlaceEnv():
         return overlap_areas
 
     def __mask_normalization(self, mask1, mask2=None):
-        mask1_ = copy.deepcopy(mask1)
+        # These values are always ndarrays.  Avoid deepcopy's recursive
+        # dispatch on every macro step and compute extrema only once.
+        mask1_ = np.array(mask1, copy=True)
         if mask2 is not None:
-            mask2_ = copy.deepcopy(mask2)
-            if np.abs(mask1).max() > 0 or np.abs(mask2).max() > 0:
-                mask1_ /= max(np.abs(mask1_).max(), np.abs(mask2_).max())
-                mask2_ /= max(np.abs(mask1).max(), np.abs(mask2).max())
+            mask2_ = np.array(mask2, copy=True)
+            max_abs_1 = np.abs(mask1).max()
+            max_abs_2 = np.abs(mask2).max()
+            denominator = max(max_abs_1, max_abs_2)
+            if denominator > 0:
+                mask1_ /= denominator
+                mask2_ /= denominator
             return mask1_, mask2_
         else:
-            mask1_ /= max(np.abs(mask1_).max(), 1e-10)
+            mask1_ /= max(np.abs(mask1).max(), 1e-10)
             return mask1_, None
     
     def prune_dataflow_mat(self, keep_ratio=0.1):

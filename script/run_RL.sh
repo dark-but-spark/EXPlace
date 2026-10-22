@@ -1,4 +1,13 @@
-GPU_IDS=(0 1 2 3)
+# GPU_IDS is supplied by the caller/scheduler. With no list, run one design
+# at a time and inherit CUDA_VISIBLE_DEVICES unchanged.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/activate_cuda118.sh"
+GPU_IDS_TEXT="${GPU_IDS:-}"
+if [[ -n "${GPU_IDS_TEXT}" ]]; then
+    read -r -a GPU_IDS <<< "${GPU_IDS_TEXT}"
+else
+    GPU_IDS=(auto)
+fi
 
 design_names=(
     # "ariane133"
@@ -29,12 +38,17 @@ while [ $idx -lt $num_designs ]; do
         design=${design_names[i]}
         gpu_idx=$(( (i - idx) % num_gpus ))
         gpu_id=${GPU_IDS[$gpu_idx]}
-        echo "Starting $design on GPU $gpu_id"
-        python -m src.main --benchmark "$design" --seed 3 --config or --gpu "$gpu_id" &
+        if [[ "${gpu_id}" == auto ]]; then
+            echo "Starting $design with inherited GPU allocation"
+            python -m src.main --benchmark "$design" --seed 3 --config or &
+        else
+            echo "Starting $design on GPU $gpu_id"
+            python -m src.main --benchmark "$design" --seed 3 --config or --gpu "$gpu_id" &
+        fi
     done
     wait
     idx=$batch_end
 done
 echo "All designs finished."
 
-# python -m src.main --benchmark "superblue1" --seed 3 --config iccad --gpu 0 --debug
+# CUDA_VISIBLE_DEVICES=1 python -m src.main --benchmark "superblue1" --seed 3 --config iccad --debug

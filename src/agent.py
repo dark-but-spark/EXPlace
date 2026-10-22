@@ -88,11 +88,16 @@ class PPOAgent():
         """
         # state: [batch, ...], do not add unsqueeze(0)
         state = th.from_numpy(state).float().to(self.args.device)
-        with th.no_grad():
+        # Rollout inference never needs autograd metadata.  inference_mode
+        # also disables version-counter/view tracking used by no_grad.
+        with th.inference_mode():
             with (th.autocast(device_type=state.device.type, dtype=self.amp_dtype)
                   if self.mixed_precision else nullcontext()):
                 action_prob = self.actor(state)  # [batch, N]
-        dist = Categorical(action_prob)
+        # Autocast is limited to CNN/MLP kernels.  Keep probability
+        # construction and sampling in FP32 so low-precision logits cannot
+        # trigger distribution kernels or alter the non-AMP baseline path.
+        dist = Categorical(action_prob.float())
         if self.training:
             action = dist.sample()  # [batch]
         else:
@@ -160,7 +165,7 @@ class PPOAgent():
                     with (th.autocast(device_type=batch_state.device.type, dtype=self.amp_dtype)
                           if self.mixed_precision else nullcontext()):
                         action_prob = self.actor(batch_state)
-                    dist = Categorical(action_prob)
+                    dist = Categorical(action_prob.float())
                     action_log_prob = dist.log_prob(batch_action.squeeze())
                     ratio = th.exp(action_log_prob - batch_old_action_log_prob.squeeze())
                     target_v = batch_target_v
@@ -169,10 +174,11 @@ class PPOAgent():
                     with (th.autocast(device_type=batch_state.device.type, dtype=self.amp_dtype)
                           if self.mixed_precision else nullcontext()):
                         critic_output = self.critic(batch_state[:, :1])
-                    # Keep the historical FP32 path untouched. Only the
-                    # opt-in BF16 AMP path needs a narrow loss fallback on
-                    # PyTorch builds without smooth_l1 BF16 backward.
-                    if self.mixed_precision and self.amp_dtype == th.bfloat16:
+                    # Some CUDA builds have no BF16 smooth_l1 backward
+                    # kernel.  Compute the value loss and advantage in FP32
+                    # for every opt-in AMP dtype; with AMP disabled these
+                    # references are unchanged and preserve the baseline.
+                    if self.mixed_precision:
                         critic_loss_output = critic_output.float()
                         critic_loss_target = target_v.float()
                     else:
@@ -239,10 +245,12 @@ class PPOAgent():
         checkpoint = th.load(checkpoint_path, map_location=th.device(self.args.device))
         if 'actor' in checkpoint and 'critic' in checkpoint:
             self.actor.load_state_dict(checkpoint['actor'])
-            self.critic.load_state_dict(checkpoint['critic'])
+            critic_state = checkpoint['critic']
         else:
             self.actor.load_state_dict(checkpoint['model_state_dict'])
-            self.critic.load_state_dict(checkpoint['critic_state_dict'])
+            critic_state = checkpoint.get('critic_state_dict')
+        if self.critic is not None and critic_state is not None:
+            self.critic.load_state_dict(critic_state)
         if 'reward_weights' in checkpoint:
             self.set_reward_weights(checkpoint['reward_weights'])
 
