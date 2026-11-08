@@ -1,17 +1,51 @@
 """Isolated asynchronous DREAMPlace/OpenTimer evaluator."""
 
 import copy
+import os
+import sys
 
-import numpy as np
 import ray
 
 
-@ray.remote(num_gpus=0)
+def _candidate_import_paths():
+    paths = []
+    module_file = globals().get('__file__')
+    if module_file:
+        src_dir = os.path.dirname(os.path.abspath(module_file))
+        root_dir = os.path.dirname(src_dir)
+        paths = [
+            src_dir,
+            os.path.join(root_dir, 'DREAMPlace', 'install'),
+            os.path.join(root_dir, 'DREAMPlace', 'install', 'dreamplace'),
+        ]
+    return paths
+
+
+def prepare_worker_import_paths(args):
+    """Make repo-local and DREAMPlace modules importable in a Ray worker."""
+    paths = list(getattr(args, 'runtime_paths', ()) or ())
+    paths.extend(_candidate_import_paths())
+    for path in paths:
+        if path and path not in sys.path:
+            sys.path.insert(0, path)
+
+
+_WORKER_PYTHONPATH = os.pathsep.join(
+    _candidate_import_paths() + [os.environ.get('PYTHONPATH', '')]
+).strip(os.pathsep)
+
+
+@ray.remote(
+    num_cpus=0,
+    num_gpus=0,
+    runtime_env={"env_vars": {"PYTHONPATH": _WORKER_PYTHONPATH}},
+)
 class AsyncPhysicalEvaluator:
     """Own the physical-design state in one serialized Ray actor."""
 
     def __init__(self, args, benchmark):
         # A worker must never share PlaceDB/OpenTimer state with training.
+        prepare_worker_import_paths(args)
         from problem_instance import ProblemInstance
 
         eval_args = copy.copy(args)

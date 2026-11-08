@@ -17,6 +17,24 @@ from model.actor import Actor
 from model.critic import Critic
 
 
+def resolve_return_gamma(args):
+    """Resolve the discount factor used for PPO cumulative returns.
+
+    Step-granularity rewards are discounted by ``reward_discount_gamma`` when
+    the config opts into it, and fall back to ``gamma`` otherwise so existing
+    configs keep their historical behavior.  Global (terminal whole-placement)
+    rewards are not discounted and use ``global_reward_gamma``.
+
+    ``gamma`` is deliberately not used for the step discount here because it
+    also drives PLM community resolution in ``problem_instance.py``; changing
+    it for the discount would silently change the state representation.
+    """
+    return_gamma = getattr(args, 'reward_discount_gamma', args.gamma)
+    if getattr(args, 'reward_granularity', 'step') == 'global':
+        return_gamma = getattr(args, 'global_reward_gamma', 1.0)
+    return return_gamma
+
+
 class PPOAgent():
     def __init__(self, args, inference_only=False):
         self.args = args
@@ -129,11 +147,7 @@ class PPOAgent():
             # Calculate cumulative returns
             target_list = []
             target = 0
-            return_gamma = self.args.gamma
-            if getattr(self.args, 'reward_granularity', 'step') == 'global':
-                # A terminal whole-placement score should reach early macros
-                # without exponentially vanishing over a long placement.
-                return_gamma = getattr(self.args, 'global_reward_gamma', 1.0)
+            return_gamma = resolve_return_gamma(self.args)
             for i in range(reward.shape[0]-1, -1, -1):
                 if done[i, 0] == 1:
                     target = 0

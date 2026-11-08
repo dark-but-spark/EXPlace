@@ -1,6 +1,7 @@
 import numpy as np
 import torch as th
 import random
+import math
 import os
 import sys
 import time
@@ -318,6 +319,7 @@ def main(args, config_path):
     best_gp_hpwl = float('inf')  # lower is better
     best_metrics_path = os.path.join(args.log_dir, 'best_metrics.csv')
     runtime_path = os.path.join(args.log_dir, 'runtime.csv')
+    args.runtime_paths = [SRC_DIR, DREAMPLACE_PARENT_DIR, DREAMPLACE_DIR]
     async_evaluator = (
         AsyncPhysicalEvaluator.remote(args, args.design_name)
         if args.use_dmp_for_evaluation and getattr(args, 'async_evaluation', True)
@@ -349,23 +351,64 @@ def main(args, config_path):
             writer.add_scalar(f'reward_weight/{name}', value, eval_episode)
         print(f"Adaptive reward weights: {weight_update.weights}")
 
+    def reject_async_eval(eval_episode, kind, failure_reason):
+        if not args.debug and kind == 'periodic':
+            save_physical_evaluation(
+                os.path.join(args.log_dir, 'physical_evaluations.csv'),
+                eval_episode, 'periodic',
+                float('nan'), float('nan'), float('nan'),
+                valid=False, failure_reason=failure_reason,
+            )
+        print(
+            f"Physical evaluation rejected at episode {eval_episode}: "
+            f"{failure_reason}"
+        )
+
     def consume_async_eval(block=False):
         nonlocal pending_eval, pending_context, last_metrics, best_tns, best_gp_hpwl
         if pending_eval is None:
             return False
-        ready, _ = ray.wait(
-            [pending_eval], timeout=None if block else 0
-        )
+        timeout = 0 if not block else getattr(args, 'async_eval_timeout', 900.0)
+        try:
+            ready, _ = ray.wait([pending_eval], timeout=timeout)
+        except Exception as error:
+            context = pending_context or {}
+            reject_async_eval(
+                context.get('episode', 0), context.get('kind', 'periodic'),
+                f'async_eval_exception:{type(error).__name__}',
+            )
+            pending_eval = None
+            pending_context = None
+            return True
         if not ready:
-            return False
-        result = ray.get(ready[0])
-        context = pending_context
+            if not block:
+                return False
+            context = pending_context or {}
+            reject_async_eval(
+                context.get('episode', 0), context.get('kind', 'periodic'),
+                'async_eval_timeout',
+            )
+            pending_eval = None
+            pending_context = None
+            return True
+        context = pending_context or {}
         pending_eval = None
         pending_context = None
+        try:
+            result = ray.get(ready[0])
+        except Exception as error:
+            reject_async_eval(
+                context.get('episode', 0), context.get('kind', 'periodic'),
+                f'async_eval_exception:{type(error).__name__}',
+            )
+            return True
         gp_hpwl, tns, wns = result['metrics']
         eval_episode = result['episode']
-        valid = bool(result.get('valid', True))
         failure_reason = result.get('failure_reason', '')
+        finite = all(math.isfinite(float(value)) for value in (gp_hpwl, tns, wns))
+        valid = bool(result.get('valid', True)) and finite
+        if not finite:
+            failure_reason = 'non_finite_metrics'
         if not args.debug and context.get('kind') == 'periodic':
             save_physical_evaluation(
                 os.path.join(args.log_dir, 'physical_evaluations.csv'),
@@ -426,12 +469,14 @@ def main(args, config_path):
             if async_evaluator is not None:
                 if pending_eval is None:
                     trajectory = inference(args, model_path=None, agent=agent, test_env=test_env)
+                    agent.train()
                     pending_context = {
                         'trajectory': trajectory,
                         'reward_info': reward_info,
                         'actor_loss': actor_loss,
                         'critic_loss': critic_loss,
                         'kind': 'periodic',
+                        'episode': episode_counter,
                     }
                     pending_eval = async_evaluator.evaluate.remote(
                         episode_counter, trajectory['macro_pos']
@@ -441,11 +486,15 @@ def main(args, config_path):
                     print("Physical evaluation pending; skipping stale submission")
             else:
                 trajectory = inference(args, model_path=None, agent=agent, test_env=test_env)
+                agent.train()
                 gp_hpwl, tns, wns = test_problem.evaluate(trajectory['macro_pos'])
                 valid_value = getattr(test_problem, 'last_evaluation_valid', True)
                 valid = valid_value if isinstance(valid_value, bool) else True
                 reason_value = getattr(test_problem, 'last_evaluation_failure', '')
                 failure_reason = reason_value if isinstance(reason_value, str) else ''
+                if not all(math.isfinite(float(value)) for value in (gp_hpwl, tns, wns)):
+                    valid = False
+                    failure_reason = 'non_finite_metrics'
                 if not args.debug:
                     save_physical_evaluation(
                         os.path.join(args.log_dir, 'physical_evaluations.csv'),
@@ -517,6 +566,7 @@ def main(args, config_path):
                         'actor_loss': actor_loss,
                         'critic_loss': critic_loss,
                         'kind': 'best_reward',
+                        'episode': episode_counter,
                     }
                     pending_eval = async_evaluator.evaluate.remote(episode_counter, macro_pos)
                 elif async_evaluator is None:
