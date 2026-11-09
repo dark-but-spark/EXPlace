@@ -17,6 +17,27 @@ commit/工作区状态、原始日志和结论追加到 `EXPERIMENT_ARCHIVE.md`�
   `sm_XX` 架构。
 - [x] 在同一 benchmark/seed 上确认 `final`、`best`、`best-to-final` 三种指标口径；
   结果归档在 `experiment_records/20260920_superblue18_4x3/`。
+- [x] 增加独立 `reward_discount_gamma`（`src/agent.py:resolve_return_gamma`），把
+  step 奖励折扣与 `gamma`（同时是 PLM community resolution）解耦；控制组配置为
+  `config/step_gamma1.yaml`，结果归档在
+  `experiment_records/20261108_superblue18_step_gamma1/`。
+
+## P0: DREAMPlace 合法性
+
+- [x] 修复 macro 级大错误（std cell 压 macro 的成块重叠）：
+  `patches/dreamplace/macro_legalize_local_grid_repair.patch`（grid 对齐 + 重叠面积
+  打分 local repair + Hannan fallback）。superblue18 已达 60/60 合法。
+- [ ] **决定（2026-11-08）：sb4 的 2–9 单位薄条暂不修复。**
+  - 现状：sb4 47/60（78.3%）合法，13 次失败全部是 `dreamplace_legality_check_failed`，
+    形态为 std cell ↔ fixed macro 的薄条（`577×9`、`90×9`、`1940×9`），集中在 seed 7。
+  - 不修的理由：(a) legality gate 会把这些 layout 判为 `invalid` 并丢弃，
+    **不会污染 PPA 指标**，只降低有效样本数；(b) 已修的大错误（成块重叠）才真正影响
+    legalizer 结果与评估可信度；(c) sb18 主线 60/60 不受影响。
+  - 注意：不要把它简化为「DREAMPlace 对小错误容忍度高」。DREAMPlace 的
+    Hannan/Abacus 擅长消解 std cell 之间的重叠，对「std cell 压 fixed macro」这类
+    需要跨越固定障碍的薄条并不保证能挪开。
+  - 重新打开的条件：正式对外报告 sb4 结果前，先 dump 一次失败布局，确认薄条对
+    OpenTimer 数值确有可忽略影响，再决定「放宽 gate」还是「修 legalizer」。
 
 ## P0: CUDA 12 算子迁移
 
@@ -60,6 +81,18 @@ commit/工作区状态、原始日志和结论追加到 `EXPERIMENT_ARCHIVE.md`�
 
 ## P1: 评价指标和实验设计
 
+- [x] 完成 `step + gamma=1` 控制组（2026-11-08）：拆开「奖励粒度」与「折扣因子」的
+  混杂。结论：折扣是真实混杂项，但粒度仍有独立效果——`step+gamma=1` 峰值 TNS 最好
+  （-123.88），`global+gamma=1` 终值 TNS 最好（-148.02）且最稳定（GP 回归 0.08%）。
+  不得再把 H1 写成「只是折扣偏差」。详见
+  `experiment_records/20261108_superblue18_step_gamma1/README.md`。
+- [ ] **label fidelity（P1-1）的报告口径硬性要求**：
+  - 必须**分电路报告** Spearman ρ 的分布与符号反转，不得只报均值。
+  - 均值需用 **Fisher z 变换**后再平均，不能直接算术平均 ρ。
+    （参照 PPAPlace：post-CTS 的 `ρ̄=0.38` 是由 bp_be `+0.83` 与 ethernet `−0.31`
+    平均出来的，均值掩盖了符号反转；反之 post-GRT 的 `ρ̄=0.86` 在 10/10 电路上都
+    `ρ≥0.78` 且无反转，均值可信。）
+  - 决策门仍为 ρ>0.7 继续 / 0.4–0.7 降级 / <0.4 停止权重学习，但必须按电路分别判。
 - [ ] 增加 seed `17/23/29`。
 - [ ] 增加 `superblue1`、`superblue3`，至少保留 `superblue18` 对照。
 - [ ] 补充 rWL、rOverflow、congestion、DRC；条件允许时补 Power/Area/NVP。
@@ -83,3 +116,5 @@ commit/工作区状态、原始日志和结论追加到 `EXPERIMENT_ARCHIVE.md`�
 - [ ] 不把 cu118 PyTorch 与未经验证的 CUDA12 extension 当作正式性能基线。
 - [ ] 不用 GP-HPWL 单独宣称 PPA 改善。
 - [ ] 不把单 benchmark、3 seed 的结果写成统计显著或普适结论。
+- [ ] 不把本项目绝对 TNS/WNS 与论文的 32.53%/7.74% 直接比较：论文口径是相对
+  runner-up 的提升，本项目目前只报绝对指标，且未复现论文的 runner-up 基线。

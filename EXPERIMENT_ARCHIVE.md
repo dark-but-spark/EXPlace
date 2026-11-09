@@ -20,6 +20,8 @@
 | `long_runs/global_multidesign_adaptive_fixed_20261012_095649` | 修复后 adaptive 重跑 | 24/24 成功 | 4 电路 x 3 seeds x 2 adaptive 粒度；权重从 episode 400 开始更新，记录见 `experiment_records/202610_reward_multidesign/`。 |
 | `long_runs/legalization_hannan_fix_20261020_093027` | 合法性短测 | 2/2 成功，10/10 合法 | superblue18 seed 3，验证 local-grid + Hannan fallback。 |
 | `long_runs/legalization_matrix_20261020_100329` | 跨电路合法性矩阵 | **未完成：28/48 成功** | 另有 2 个任务中断，累计 132/145 物理评估合法；superblue4 仍有 13 次失败。轻量记录见 `experiment_records/20261020_legalization/`。 |
+| `long_runs/20261027_105819_legalization_finish` | 24 任务合法性矩阵（50 ep） | 24/24 成功 | sb18 **60/60** 合法，sb4 **47/60**（78.3%）；13 次失败全为 `dreamplace_legality_check_failed`，形态是 std cell ↔ fixed macro 薄条，集中 seed 7。仅正确性验证，P1-1 不能用它读 PPA。轻量记录见 `experiment_records/20261027_legalization_finish/`。 |
+| `long_runs/step_gamma1_20261108` | `step+gamma=1` 控制组 | 6/6 成功 | sb18，seeds 3/7/11，`fixed_step`+`adaptive_step`，`config/step_gamma1.yaml`（`reward_discount_gamma=1.0`，`gamma=0.95` 不动），1500 ep，双 L40S 并行约 4 小时。记录见 `experiment_records/20261108_superblue18_step_gamma1/`。 |
 
 ## 主要长跑结果
 
@@ -32,6 +34,12 @@
 - `adaptive_step` 的 best TNS 是四个 variant 中最好。
 - `adaptive_global` 的 final GP-HPWL、final TNS、final WNS 和 best-to-final 稳定性最好。
 - `fixed_global` 说明只改变 reward 粒度不能保证改善。
+- **奖励粒度与折扣因子是两个独立因素**（`step+gamma=1` 控制组，2026-11-08 补齐）：
+  - 折扣 0.95 → 1.0 使 `adaptive_step` best TNS 从 -133.61 改善到 **-123.88**；
+  - 但 `step+gamma=1` 与 `global+gamma=1` 并不等价：前者峰值 TNS 最好，后者终值 TNS
+    最好（-148.02）且最稳（GP 回归 0.08% vs 1.70%）；
+  - 因此 H1 不能写成「只是折扣偏差」；正确的读法是 **step 适合冲峰值（配合
+    backtrack 取 checkpoint），global 适合稳定收敛（用 final 模型）**。
 - 三个 seed 都出现 `df` 上升、`reg` 下降，但 `port=.05` 是配置中的固定项，不能视为自然学习结果。
 - 结果是 `superblue18`、3 seeds、DREAMPlace + OpenTimer post-placement 流程；不能直接替代 post-GRT/post-DRT 或论文 PPA signoff。
 
