@@ -22,6 +22,7 @@
 | `long_runs/legalization_matrix_20261020_100329` | 跨电路合法性矩阵 | **未完成：28/48 成功** | 另有 2 个任务中断，累计 132/145 物理评估合法；superblue4 仍有 13 次失败。轻量记录见 `experiment_records/20261020_legalization/`。 |
 | `long_runs/20261027_105819_legalization_finish` | 24 任务合法性矩阵（50 ep） | 24/24 成功 | sb18 **60/60** 合法，sb4 **47/60**（78.3%）；13 次失败全为 `dreamplace_legality_check_failed`，形态是 std cell ↔ fixed macro 薄条，集中 seed 7。仅正确性验证，P1-1 不能用它读 PPA。轻量记录见 `experiment_records/20261027_legalization_finish/`。 |
 | `long_runs/step_gamma1_20261108` | `step+gamma=1` 控制组 | 6/6 成功 | sb18，seeds 3/7/11，`fixed_step`+`adaptive_step`，`config/step_gamma1.yaml`（`reward_discount_gamma=1.0`，`gamma=0.95` 不动），1500 ep，双 L40S 并行约 4 小时。记录见 `experiment_records/20261108_superblue18_step_gamma1/`。 |
+| `long_runs/p12_multidesign_20261109` | P1-2 多电路 × 6 seeds | **22/24 成功**（2 个 OpenTimer SIGSEGV） | `superblue1`+`superblue3`，seeds 3/7/11/17/23/29，`fixed_global`+`adaptive_global`，`config/adaptive_global.yaml`，8 卡并行约 15 小时。342 次评估中 4 次 invalid（1.17%）。两个失败均在 `launch rc tree construction...` 处 exit 139（合法性已通过）。**结论：sb18 的 adaptive 优势未复现**；仅 WNS 可复现（10/12）。记录见 `experiment_records/20261109_p12_multidesign/`。 |
 
 ## 主要长跑结果
 
@@ -42,6 +43,23 @@
     backtrack 取 checkpoint），global 适合稳定收敛（用 final 模型）**。
 - 三个 seed 都出现 `df` 上升、`reg` 下降，但 `port=.05` 是配置中的固定项，不能视为自然学习结果。
 - 结果是 `superblue18`、3 seeds、DREAMPlace + OpenTimer post-placement 流程；不能直接替代 post-GRT/post-DRT 或论文 PPA signoff。
+
+### 跨电路复现性（2026-11-09 修定，优先于上面的单电路结论）
+
+P1-2（`superblue1` + `superblue3`，6 seeds，`fixed_global` vs `adaptive_global`）**没有
+复现 `superblue18` 的 adaptive 优势**：
+
+- post-adaptation 窗口（episode > 400）内，best TNS 5胜/7负（p=0.77）、
+  best GP-HPWL 5胜/7负（p=0.77）、final TNS 6胜/3负（p=0.51）——均不显著；
+- 唯一可复现的正向信号是 **WNS**（10胜/2负，均值 +5.05%，p=0.039），
+  以及 final GP-HPWL 小幅改善 1–3%；
+- 权重的末态在 seed 间差异极大（`df` 0.13–0.49、`wire` 0.10–0.39），怀疑 ρ 驱动的更新
+  在拟合噪声，直接支撑 P1-1（label fidelity）的必要性。
+
+因此：**“adaptive 权重更好”目前只能限定在 `superblue18` 单设计、单次 3-seed 上；不得
+写成跨电路结论。** 同时注意：对 `adaptive_*` 臂，`best_*` 必须限定
+`episode > 首次权重更新`（默认 400），否则更新前的共享前缀会造出假平局；实现见
+`experiment_records/20261109_p12_multidesign/analyze_post_adaptation.py`。
 
 原始文件：
 

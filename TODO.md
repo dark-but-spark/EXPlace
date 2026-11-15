@@ -86,15 +86,29 @@ commit/工作区状态、原始日志和结论追加到 `EXPERIMENT_ARCHIVE.md`�
   （-123.88），`global+gamma=1` 终值 TNS 最好（-148.02）且最稳定（GP 回归 0.08%）。
   不得再把 H1 写成「只是折扣偏差」。详见
   `experiment_records/20261108_superblue18_step_gamma1/README.md`。
-- [ ] **label fidelity（P1-1）的报告口径硬性要求**：
+- [ ] **label fidelity（P1-1）的报告口径硬性要求**（尚未执行 P1-1 本体，仅先定口径）：
   - 必须**分电路报告** Spearman ρ 的分布与符号反转，不得只报均值。
   - 均值需用 **Fisher z 变换**后再平均，不能直接算术平均 ρ。
     （参照 PPAPlace：post-CTS 的 `ρ̄=0.38` 是由 bp_be `+0.83` 与 ethernet `−0.31`
     平均出来的，均值掩盖了符号反转；反之 post-GRT 的 `ρ̄=0.86` 在 10/10 电路上都
     `ρ≥0.78` 且无反转，均值可信。）
   - 决策门仍为 ρ>0.7 继续 / 0.4–0.7 降级 / <0.4 停止权重学习，但必须按电路分别判。
-- [ ] 增加 seed `17/23/29`。
-- [ ] 增加 `superblue1`、`superblue3`，至少保留 `superblue18` 对照。
+- [x] 增加 seed `17/23/29` 与 `superblue1`、`superblue3`（2026-11-09，P1-2）：
+  24 任务 22/24 成功（2 个 OpenTimer SIGSEGV），6 seeds × 2 电路 × fixed/adaptive_global。
+  **结果：sb18 的 adaptive 优势没有复现** —— post-adaptation 窗口内 TNS 5胜/7负
+  （p=0.77）、best GP-HPWL 5胜/7负（p=0.77）；唯一可复现的正向信号是 WNS
+  （10胜/2负，p=0.039），且 final GP-HPWL 小幅改善 1–3%。
+  详见 `experiment_records/20261109_p12_multidesign/README.md`。
+- [ ] **`best_*` 指标的口径硬性要求（2026-11-09）**：对 `adaptive_*` 臂，任何 `best_*`
+  比较必须限定在 **episode > 首次权重更新 episode**（默认 400，应从
+  `reward_weights.csv` 推导）。因为更新前的评估在两臂之间逐位相同，会把配对差压成 0
+  并制造假「平局」。实现见
+  `experiment_records/20261109_p12_multidesign/analyze_post_adaptation.py`。
+  `script/summarize_experiment.py` 的全程 `best_*` 仅适用于 fixed 臂或只看 `final`。
+- [ ] **修复 OpenTimer RC-tree 段错误**：`superblue3` 上 2/24 任务在
+  `launch rc tree construction...` 处 SIGSEGV（exit 139），合法性检查已通过，
+  发生在时序分析阶段，非 legality 失败。目前导致任务丢失（只能跑到 ep800）。
+  需要：定位是否与 placement 边界/电源网有关，并加重试或跳过该评估的容错。
 - [ ] 补充 rWL、rOverflow、congestion、DRC；条件允许时补 Power/Area/NVP。
 - [ ] 明确 post-placement OpenTimer、post-GRT、post-DRT 的评估阶段和量纲。
 - [ ] 使用固定 checkpoint/validation 选择，减少周期物理评估后取 best 的选择偏差。
