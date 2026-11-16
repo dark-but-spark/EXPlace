@@ -155,15 +155,26 @@ commit/工作区状态、原始日志和结论追加到 `EXPERIMENT_ARCHIVE.md`�
 - [x] or_cases 设计的 legality：`config/or_legal.yaml`
       （halo 0 / core_area_block 0 / corner_flag False / soft_coefficient 1.0 /
       dataflow_cutoff 0.00）；`bp_fe` 两次评估均 `valid=1` 并写出 DEF。
-- [ ] **阻塞：GRT 阶段失败**。`bp_fe` 已走到 2_5 floorplan → place → CTS，
-      但 `5_1_grt` 报 `GRT-0041 Net VSS has wires/vias outside die area` 后阶段失败
-      （错误信息表现为 `can't read env(RESULTS_DIR)`，实际是 global_route 失败后的
-      failure branch）。`make grt` 不能绕过（依赖 synth，缺 `oss-cad-suite/bin/yosys`）。
-- [ ] 下一步：核对 PDN strap offset 与 `DIE_AREA/CORE_AREA`（bp_fe 为 790×590 in
-      800×600，strap 可能越界）；或试 `SKIP_INCREMENTAL_REPAIR=1`、
-      `SKIP_ANTENNA_REPAIR=1` 判断是 repair 流程还是 router 本体。
+- [x] **GRT 已打通**（2026-11-16）。三个连环问题逐个解决：
+      1. `GRT-0041 Net VSS has wires/vias outside die area`：`bp_fe_top` 的
+         `CORE_AREA` 是 `0 0 790 590`（与 DIE 同原点，0 边距），PDN rail/strap 落到
+         die 外。改为 `5 5 795 595`（与 ariane133 一致的 5 µm 内缩）后 GRT-0041 **归零**。
+      2. `GRT-0115 布线后仍有拥塞`：60 ep 的布局太差。改为训练 600 ep，并在 GRT 阶段
+         用 `ROUTING_LAYER_ADJUSTMENT=0.13`（GRT-0704 自己建议的值）+
+         `GLOBAL_ROUTE_ARGS="-congestion_iterations 30 ..."`，拥塞消失。
+      3. `can't read "env(RESULTS_DIR)"`：**真因**是 EXPlace fork 把
+         `source write_ref_sdc.tcl` 放进了 `proc global_route_helper`，而该脚本用
+         未限定的 `$env(RESULTS_DIR)`，proc 内看不到全局 env 数组。改成 `$::env(...)`。
+- [x] **首个 Tier-2 标签产出**：`bp_fe` 全流程跑完（floorplan → place → cts →
+      grt → drt → fill → finish，约 40 min）。
+      post-GRT：TNS **-75.59** / WNS **-0.27**；post-DRT：**-103.89** / **-0.29**；
+      748 个 DRT violation（不要求 DRC clean）。
+      记录：`experiment_records/20261116_tier2_bp_fe/`。
+- [ ] **Tier-1 时序仍缺失**：`config/or_legal.yaml` 关掉了 timer（`tns/wns=0`），
+      需对同一 placement 用 `use_timer_for_evaluation: True` 重算（或
+      `script/diagnostics/repro_timer_pos.py` 回放），才能配对 Tier-1 vs Tier-2。
 - [ ] 需要 20–30 个分层 placement（best/median/worst）的 Tier-2 标签后，才能做
-      P1-1 的 ρ 计算。**任何 flow 改动都必须写进 experiment record**。
+      P1-1 的 ρ 计算（分电路 + Fisher z）。**任何 flow 改动都必须写进 experiment record**。
 
 ## P2: PPA surrogate 方向
 

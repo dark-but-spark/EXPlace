@@ -1,0 +1,4 @@
+stage,design,seed,source_run,def_bytes,component,gp_hpwl,tns_ns,wns_ns,notes
+tier1,bp_fe,3,long_runs/or_legal_bp_fe_r2,9068068,best_gp_hpwl.def,11142746,,,DREAMPlace proxy; timer disabled in or_legal.yaml
+tier2_grt,bp_fe,3,long_runs/or_legal_bp_fe_r2,9068068,best_gp_hpwl.def,,-75.59,-0.27,OpenROAD 5_1_grt; ROUTING_LAYER_ADJUSTMENT=0.13
+tier2_drt,bp_fe,3,long_runs/or_legal_bp_fe_r2,9068068,best_gp_hpwl.def,,-103.89,-0.29,OpenROAD 6_report; 748 DRT violations; not DRC-clean

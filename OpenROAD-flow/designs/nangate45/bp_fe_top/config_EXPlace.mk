@@ -25,7 +25,7 @@ export ADDITIONAL_LIBS = $(PLATFORM_DIR)/lib/fakeram45_512x64.lib \
                          $(PLATFORM_DIR)/lib/fakeram45_64x96.lib
 
 export DIE_AREA    = 0 0 800 600 
-export CORE_AREA   = 0 0 790 590 
+export CORE_AREA   = 5 5 795 595
 
 export PLACE_PINS_ARGS = -exclude left:400-700 -exclude right:400-700 -exclude top:*
 
