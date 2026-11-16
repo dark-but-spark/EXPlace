@@ -241,12 +241,44 @@ class ProblemInstance():
        
         return gp_hpwl, tns, wns
 
+    def _dump_pre_timing_position(self):
+        """Dump the exact position array fed to the timing operator.
+
+        Diagnostic only, enabled by EXPLACE_DUMP_PRE_TIMING=<dir>.  OpenTimer
+        segfaults inside its C++ RC-tree construction, which cannot be caught
+        from Python, so the only way to reproduce the crash quickly is to
+        capture the position that was about to be analysed and replay it in a
+        standalone harness under gdb.
+        """
+        dump_dir = os.environ.get('EXPLACE_DUMP_PRE_TIMING')
+        if not dump_dir:
+            return
+        try:
+            os.makedirs(dump_dir, exist_ok=True)
+            index = getattr(self, '_pre_timing_dump_index', 0)
+            self._pre_timing_dump_index = index + 1
+            pos = self.dmp_placer.pos
+            # NonLinearPlace.pos is a DREAMPlace ParameterList, not a tensor.
+            if hasattr(pos, 'detach'):
+                array = pos.detach().cpu().numpy()
+            else:
+                array = pos[0].detach().cpu().numpy()
+            np.save(os.path.join(dump_dir, f'pre_timing_pos_{index:03d}.npy'), array)
+            with open(os.path.join(dump_dir, 'dumps.log'), 'a') as handle:
+                handle.write(f'{index}\tshape={array.shape}\tn_nodes={array.shape[-1]}\n')
+        except Exception as error:  # never let diagnostics break training
+            print(f'[dump_pre_timing] failed: {error}')
+
     def evaluate_timing(self):
         """
         Evaluate timing metrics (TNS and WNS) using the timing operator.
         Returns:
             tuple: (tns, wns) timing metrics
         """ 
+        # Dump first: a crash can happen before the timing operator is even
+        # touched, so capturing the position at the top of the function keeps
+        # the dump and the crash in the same evaluation.
+        self._dump_pre_timing_position()
         # Get timing operator from the placer's op_collections
         timing_op = self.dmp_placer.op_collections.timing_op
         time_unit = timing_op.timer.time_unit()

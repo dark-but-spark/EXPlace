@@ -39,6 +39,33 @@ commit/工作区状态、原始日志和结论追加到 `EXPERIMENT_ARCHIVE.md`�
   - 重新打开的条件：正式对外报告 sb4 结果前，先 dump 一次失败布局，确认薄条对
     OpenTimer 数值确有可忽略影响，再决定「放宽 gate」还是「修 legalizer」。
 
+## 已知问题: OpenTimer RC-tree 段错误（根因已定位，暂不打补丁）
+
+2026-11-16 用 gdb + 非 LTO 重编译完成定位，完整配方见 `script/diagnostics/README.md`。
+
+- **现象**：`exit 139`，日志最后一行 `[INFO] launch rc tree construction...`，
+  无 Python traceback（崩在 C++，`try/except` 抓不到）。
+- **根因**：`ot::Rct::_update_load()`（`thirdparty/OpenTimer/ot/timer/net.cpp:158`）
+  递归无环守卫。`insert_segment()` 为每段插入**双向边**，而遍历只排除**直接父节点**，
+  因此底层的 **3 个及以上的环** 会无限递归直到栈溢出。
+  `_update_delay/_update_ldelay/_update_response` 同样写法，同样会崩。
+- **触发**：某次 layout 让某个 net 的 SPEF `*RES` 出现退化/重名节点
+  （`Net::_make_rct()` net.cpp:295），图闭合成环。**不是**累积内存损坏：
+  同一位置重复 `update_timing()` 12 次不崩，单点回放也不崩，需要**多次不同位置**。
+- **已观测失败率**：superblue18 0/24、superblue1 0/12、superblue3 2/12（约 17%）。
+  失败任务会跑到中途直接丢失（无 checkpoint 续跑，重跑从 ep0 开始）。
+- **决定：暂不改 OpenTimer**（visited 守卫约 20 行、对合法树零差异，但属第三方
+  数值关键代码改动，产生上游同步与复现解释负担）。四个选项与代价：
+  1. **保留争议 + 重跑失败任务**（当前采用，成本 0，浪费约 4h/失败任务）
+  2. 评估隔离到常驻子进程（半天，需 spawn 不能 fork，CUDA 已初始化）
+  3. 训练不计时、离线批量评估（1h，但 adaptive 权重学习会失效）
+  4. 打补丁（1min 重编 + 10min 验证）
+  → **重新评估条件**：再跑 24+ 任务、且以 superblue3 为主的矩阵前，改做选项 2。
+- **取证开关**：`EXPLACE_DUMP_PRE_TIMING=<dir>` 会在每次评估前 dump 位置
+  （`src/problem_instance.py`，环境变量未设时零开销）。
+- ⚠️ 不要在训练进程存活时替换 `DREAMPlace/install/.../timing_cpp*.so`
+  （会立刻 SIGSEGV，本排查中曾因此误判一次）。
+
 ## P0: CUDA 12 算子迁移
 
 - [x] 增加 `script/build_dreamplace_cuda12.sh`，强制独立 build/install 目录、显式
