@@ -33,3 +33,7 @@ vcg.lp
 config/test_quick.yaml
 config/test_superblue18.yaml
 test_explace_simple.py
+OpenROAD-flow/EXPlace_defs/
+OpenROAD-flow/logs/
+OpenROAD-flow/objects/
+OpenROAD-flow/reports/

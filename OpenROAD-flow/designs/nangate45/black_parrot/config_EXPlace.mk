@@ -42,3 +42,7 @@ export PLACE_DENSITY_LB_ADDON = 0.05
 export MACRO_PLACE_HALO    = 10 10
 export MACRO_PLACE_CHANNEL = 20 20
 export TNS_END_PERCENT     = 100
+
+# own_pdn.tcl exists in this design dir; without PDN_TCL the platform
+# default grid fails with [ERROR PDN-0179] Unable to repair all channels.
+export PDN_TCL = ./designs/nangate45/black_parrot/own_pdn.tcl

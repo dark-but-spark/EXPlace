@@ -31,3 +31,7 @@ export PLACE_PINS_ARGS = -exclude left:0-500 -exclude left:1000-1500: -exclude r
 export MACRO_PLACE_HALO = 10 10
 export MACRO_PLACE_CHANNEL = 20 20
 export TNS_END_PERCENT = 100
+
+# own_pdn.tcl exists in this design dir; without PDN_TCL the platform
+# default grid fails with [ERROR PDN-0179] Unable to repair all channels.
+export PDN_TCL = ./designs/nangate45/ariane136/own_pdn.tcl

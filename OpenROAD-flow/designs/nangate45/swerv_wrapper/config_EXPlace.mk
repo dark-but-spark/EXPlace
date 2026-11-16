@@ -36,3 +36,7 @@ export TNS_END_PERCENT        = 100
 
 export FASTROUTE_TCL = ./designs/$(PLATFORM)/$(DESIGN_NAME)/fastroute.tcl
 
+
+# own_pdn.tcl exists in this design dir; without PDN_TCL the platform
+# default grid fails with [ERROR PDN-0179] Unable to repair all channels.
+export PDN_TCL = ./designs/nangate45/swerv_wrapper/own_pdn.tcl

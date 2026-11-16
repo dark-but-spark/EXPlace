@@ -143,6 +143,28 @@ commit/工作区状态、原始日志和结论追加到 `EXPERIMENT_ARCHIVE.md`�
 - [ ] 报告每个 seed 的绝对值、均值、方差和 best-to-final，而不只报百分比。
 - [ ] 将 `fixed_global` 保留为反例，验证 global reward 单独是否足够。
 
+## P1-1 Tier-2 流水线（进行中）
+
+目标：给一批 placement 打 **post-GRT** 时序标签，用于检验 Tier-1
+（post-placement DREAMPlace + OpenTimer）的可信度。细节见 `script/tier2/README.md`。
+
+- [x] 打通链路骨架：`run_EXPlace.tcl` 读 DEF → `macro_out`（`place_macro` 行）
+      → `run_wo_synth` 的 floorplan 使用该宏位置。
+- [x] 修复 4 个 flow 缺陷（脚本不可执行、5 个设计缺 `PDN_TCL`、6 个
+      `own_pdn.tcl` 的 metal4 strap 被注释、RTLMP 参数与当前 OpenROAD 版本不兼容）。
+- [x] or_cases 设计的 legality：`config/or_legal.yaml`
+      （halo 0 / core_area_block 0 / corner_flag False / soft_coefficient 1.0 /
+      dataflow_cutoff 0.00）；`bp_fe` 两次评估均 `valid=1` 并写出 DEF。
+- [ ] **阻塞：GRT 阶段失败**。`bp_fe` 已走到 2_5 floorplan → place → CTS，
+      但 `5_1_grt` 报 `GRT-0041 Net VSS has wires/vias outside die area` 后阶段失败
+      （错误信息表现为 `can't read env(RESULTS_DIR)`，实际是 global_route 失败后的
+      failure branch）。`make grt` 不能绕过（依赖 synth，缺 `oss-cad-suite/bin/yosys`）。
+- [ ] 下一步：核对 PDN strap offset 与 `DIE_AREA/CORE_AREA`（bp_fe 为 790×590 in
+      800×600，strap 可能越界）；或试 `SKIP_INCREMENTAL_REPAIR=1`、
+      `SKIP_ANTENNA_REPAIR=1` 判断是 repair 流程还是 router 本体。
+- [ ] 需要 20–30 个分层 placement（best/median/worst）的 Tier-2 标签后，才能做
+      P1-1 的 ρ 计算。**任何 flow 改动都必须写进 experiment record**。
+
 ## P2: PPA surrogate 方向
 
 - [ ] 收集 placement、proxy costs、GP-HPWL、TNS、WNS 的统一数据集。

@@ -6,7 +6,6 @@ export SYNTH_HIERARCHICAL = 1
 export FLOW_VARIANT = EXPlace
 export MACRO_DEF = ./EXPlace_defs/$(DESIGN_NICKNAME)
 export MACRO_PLACEMENT_TCL = $(RESULTS_DIR)/macro_out
-export PDN_TCL = ./designs/$(PLATFORM)/$(DESIGN_NAME)/own_pdn.tcl
 export SKIP_IR_DROP_CHECK = 1
 #
 # RTL_MP Settings
@@ -36,3 +35,4 @@ export MACRO_PLACE_CHANNEL = 20 20
 
 export PLACE_DENSITY_LB_ADDON = 0.10
 export TNS_END_PERCENT        = 100
+export PDN_TCL = ./designs/nangate45/bp_be_top/own_pdn.tcl
