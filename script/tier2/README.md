@@ -58,29 +58,62 @@ All are inside `OpenROAD-flow/` and are required for the flow to run at all:
    (`STA-0562`), so the **RTLMP fallback cannot be used** — macro placement must
    come from our DEF.
 
-## Current state (2026-11-16)
+## Resolved blockers on the way to post-GRT labels
 
-Working:
-- `bp_fe` produces legal placements with `config/or_legal.yaml`
-  (`valid=1` at ep30 and ep60, `best_gp_hpwl.def` written, 60 episodes ≈ 64 s).
-- `run_flow.sh` gets `bp_fe` through floorplan → PDN → place → CTS.
+1. **`GRT-0041 Net VSS has wires/vias outside die area`** — `bp_fe_top` had
+   `CORE_AREA = 0 0 790 590`, i.e. the core origin equalled the die origin, so
+   PDN rails/straps straddled the die boundary. Inset to `5 5 795 595`
+   (ariane133 already uses a 5 um inset). GRT-0041 count: 15 -> 0.
+2. **`GRT-0115 Global routing finished with congestion`** — the first DEF came
+   from a 60-episode run (effectively untrained). With a 600-episode placement
+   plus `ROUTING_LAYER_ADJUSTMENT=0.13` (the value GRT-0704 itself suggests) and
+   `GLOBAL_ROUTE_ARGS="-congestion_iterations 30 -congestion_report_iter_step 5
+   -verbose"` (the config quietly used 5), congestion disappears.
+3. **`can't read "env(RESULTS_DIR)"`** — the misleading error behind both of the
+   above. Real cause: the EXPlace fork moved `source .../write_ref_sdc.tcl`
+   inside `proc global_route_helper`, and that script used the unqualified
+   `$env(RESULTS_DIR)`; inside a proc the global env array is not visible. Fixed
+   to `$::env(RESULTS_DIR)`. This error appears whenever `global_route` or its
+   post-processing fails, so always look at the warnings *above* it.
 
-Blocked:
-- **`5_1_grt`**: `global_route` logs `[WARNING GRT-0041] Net VSS has wires/vias
-  outside die area` repeatedly and then the stage dies reporting
-  `can't read "env(RESULTS_DIR)"` — i.e. `global_route` fails and the failure
-  branch of `global_route.tcl` trips over the environment. Root cause not yet
-  isolated (suspicion: the PDN straps extend outside the die because
-  `CORE_AREA`/`DIE_AREA` for this design are 790×590 inside 800×600).
-- Running `make grt` directly is not a workaround: the target depends on
-  `1_synth.rtlil`, which needs `oss-cad-suite/bin/yosys` (not installed).
+## Verified end-to-end (bp_fe, seed 3, 600 episodes)
 
-Next steps:
-1. Check the `GRT-0041` VSS-outside-die warnings: compare `own_pdn.tcl`
-   strap offsets against `DIE_AREA`/`CORE_AREA`, or add `-pitch`/`-offset`
-   clamping.
-2. If GRT keeps failing, try `SKIP_INCREMENTAL_REPAIR=1` and
-   `SKIP_ANTENNA_REPAIR=1` to see whether the failure is in the repair flow
-   rather than the router itself.
-3. Any flow change must be listed in the experiment record so Tier-2 labels are
-   reproducible.
+```
+floorplan -> PDN -> place -> CTS -> GRT -> DRT -> fill -> 6_report      ~40 min
+post-GRT : TNS -75.59 ns, WNS -0.27 ns
+post-DRT : TNS -103.89 ns, WNS -0.29 ns, 748 DRT violations (not DRC-clean)
+```
+
+Record: `experiment_records/20261116_tier2_bp_fe/`.
+
+## Tier-1 timing is not available on or_cases designs
+
+Leaving `use_timer_for_evaluation: True` on `bp_fe` aborts:
+
+```
+timing_cpp.cpp:162 Assertion `net_iter != timer.nets().end()' failed:
+could not find net name icache_1/lce/_07002_ in timer
+```
+
+DREAMPlace's net names do not match the timer's netlist for these designs, so
+P1-1 pairs **Tier-1 = DREAMPlace proxy (`gp_hpwl`)** with Tier-2 post-GRT timing,
+which is also what PPAPlace's HPWL-vs-PPA comparison does. Not fixable from our
+side; see TODO.md.
+
+## Batch runner
+
+`batch_p1_1.sh` produces paired labels for several seeds of one design:
+
+- Phase 1: N EXPlace runs (600 episodes) in parallel, one GPU each, timer off.
+- Phase 2: OpenROAD flow per placement, **sequential** (the flow stages a single
+  `EXPlace_defs/<nick>.gp.def` and a single results directory), with the three
+  knobs from the fixes above.
+- Writes `experiment_records/20261117_p1_1_labels/{labels.csv,run.log,flow_seed_*.log}`
+  and a `summary.txt` with manual Spearman (scipy is not installed).
+
+```bash
+DESIGN=bp_fe NICK=bp_fe CFGDIR=bp_fe_top SEEDS="3 7 11 17 23" GPUS="3 4 5 6 7" \
+  bash script/tier2/batch_p1_1.sh
+```
+
+Reminder: with n < 10 the correlation is a pipeline check, not a P1-1 decision.

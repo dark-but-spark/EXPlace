@@ -170,9 +170,13 @@ commit/工作区状态、原始日志和结论追加到 `EXPERIMENT_ARCHIVE.md`�
       post-GRT：TNS **-75.59** / WNS **-0.27**；post-DRT：**-103.89** / **-0.29**；
       748 个 DRT violation（不要求 DRC clean）。
       记录：`experiment_records/20261116_tier2_bp_fe/`。
-- [ ] **Tier-1 时序仍缺失**：`config/or_legal.yaml` 关掉了 timer（`tns/wns=0`），
-      需对同一 placement 用 `use_timer_for_evaluation: True` 重算（或
-      `script/diagnostics/repro_timer_pos.py` 回放），才能配对 Tier-1 vs Tier-2。
+- [x] **Tier-1 时序在 or_cases 上不可用（已确认，非本方可修）**：打开
+      `use_timer_for_evaluation: True` 后 `bp_fe` 直接 SIGABRT：
+      `timing_cpp.cpp:162 Assertion 'net_iter != timer.nets().end()' failed:
+      could not find net name icache_1/lce/_07002_ in timer` —— DREAMPlace 的 net 名
+      与 OpenTimer 网表对不上。因此 P1-1 的 Tier-1 采用 **DREAMPlace proxy
+      (`gp_hpwl`)**，与 Tier-2 post-GRT 时序配对（与 PPAPlace 的 HPWL-vs-PPA 口径一致）。
+      superblue 系列上 timer 可用，但那些设计没有 OpenROAD Tier-2 flow。
 - [ ] 需要 20–30 个分层 placement（best/median/worst）的 Tier-2 标签后，才能做
       P1-1 的 ρ 计算（分电路 + Fisher z）。**任何 flow 改动都必须写进 experiment record**。
 
