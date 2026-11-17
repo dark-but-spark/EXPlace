@@ -1,0 +1,6 @@
+samples: 5
+spearman(tier1_gp_hpwl, tier2_grt_tns) = -0.400
+spearman(tier1_gp_hpwl, tier2_grt_wns) = -0.462
+spearman(tier1_gp_hpwl, tier2_drt_tns) = +0.000
+spearman(tier1_gp_hpwl, tier2_drt_wns) = -0.500
+n<10: treat as pipeline validation only, not a P1-1 decision
