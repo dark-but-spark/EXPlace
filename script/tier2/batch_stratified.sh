@@ -28,7 +28,7 @@ mkdir -p "$OUT"
 CSV=$OUT/labels.csv
 LOG=$OUT/run.log
 if [ ! -f "$CSV" ]; then
-  echo "design,seed,eval_index,tier1_gp_hpwl,tier2_grt_tns,tier2_grt_wns,tier2_drt_tns,tier2_drt_wns,rwl_um,hotspots,drc_violations,power_w,flow_rc" > "$CSV"
+  echo "design,seed,eval_index,tier1_gp_hpwl,tier2_grt_tns,tier2_grt_wns,tier2_drt_tns,tier2_drt_wns,rwl_um,hotspots,drc_violations,power_w,flow_rc,note" > "$CSV"
 fi
 say() { echo "[strat] $*" | tee -a "$LOG"; }
 
@@ -91,6 +91,7 @@ for idx in $INDICES; do
   valid=$(awk -F, -v i="$idx" 'NR>1 && $1==i {print $2}' "$DUMP/manifest.csv")
   if [ "$valid" != "1" ]; then say "idx=$idx: invalid placement, skipping"; continue; fi
 
+  rm -f "$REP/5_global_route.rpt" "$REP/6_finish.rpt" "$REP/congestion.rpt" "$REP/5_route_drc.rpt" "$RES/6_final.def"
   cp -f "$def" "EXPlace_defs/${NICK}.gp.def"
   for f in 1_synth.v 1_synth.sdc; do [ -f "$RES/$f" ] && cp -f "$RES/$f" "/tmp/k_$f"; done
   rm -rf "$RES"; mkdir -p "$RES"
