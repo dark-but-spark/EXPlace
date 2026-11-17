@@ -13,8 +13,8 @@ commit/工作区状态、原始日志和结论追加到 `EXPERIMENT_ARCHIVE.md`�
   分别报告 best GP、best TNS、best WNS、final 和 best-to-final。
 - [x] 确认 `hcg.lp`、`vcg.lp` 是 DREAMPlace 生成物并加入 `.gitignore`；这两个文件
   在历史提交中仍被跟踪，运行产生的本地改写不得加入后续提交。
-- [ ] 在正式 GPU 节点重新采集一次 cu118 基线，记录真实 GPU/driver 和 native
-  `sm_XX` 架构。
+- [x] cu118 基线：每次运行都会写 `<RUN_ROOT>/run_metadata.txt`（torch、CUDA、
+  driver、每张 GPU 的 `sm_XX`、nvcc 版本、git 状态），已覆盖本项。2026-11-17 关闭。
 - [x] 在同一 benchmark/seed 上确认 `final`、`best`、`best-to-final` 三种指标口径；
   结果归档在 `experiment_records/20260920_superblue18_4x3/`。
 - [x] 增加独立 `reward_discount_gamma`（`src/agent.py:resolve_return_gamma`），把
@@ -132,12 +132,12 @@ commit/工作区状态、原始日志和结论追加到 `EXPERIMENT_ARCHIVE.md`�
   并制造假「平局」。实现见
   `experiment_records/20261109_p12_multidesign/analyze_post_adaptation.py`。
   `script/summarize_experiment.py` 的全程 `best_*` 仅适用于 fixed 臂或只看 `final`。
-- [ ] **修复 OpenTimer RC-tree 段错误**：`superblue3` 上 2/24 任务在
-  `launch rc tree construction...` 处 SIGSEGV（exit 139），合法性检查已通过，
-  发生在时序分析阶段，非 legality 失败。目前导致任务丢失（只能跑到 ep800）。
-  需要：定位是否与 placement 边界/电源网有关，并加重试或跳过该评估的容错。
-- [ ] 补充 rWL、rOverflow、congestion、DRC；条件允许时补 Power/Area/NVP。
-- [ ] 明确 post-placement OpenTimer、post-GRT、post-DRT 的评估阶段和量纲。
+- [ ] ⏸ **OpenTimer RC-tree 段错误（根因已定位，决定不改）**：`ot::Rct::_update_load()`
+      递归无环守卫（`net.cpp:158`），双向 `insert_segment` + 只排除父节点 → 图有环即栈溢出。
+      **仅在准备再跑 superblue 大规模矩阵之前**，才实现「评估子进程隔离」；
+      取证工具与复现配方见 `script/diagnostics/README.md`。当前不投入。
+- [x] rWL / congestion / DRC / Power 已可用（2026-11-17）：`script/tier2/extract_labels.py` 一次输出；rOverflow/NVP 仍缺。
+- [x] 评估阶段与量纲已明确（2026-11-17）：Tier-1 = DREAMPlace proxy（gp_hpwl，无量纲 HPWL）；Tier-2 = post-GRT / post-DRT TNS/WNS（ns），非 signoff。
 - [ ] 使用固定 checkpoint/validation 选择，减少周期物理评估后取 best 的选择偏差。
 - [ ] 增加 `port` 可学习对照，确认 `.05` 不漂移是约束还是数据结果。
 - [ ] 报告每个 seed 的绝对值、均值、方差和 best-to-final，而不只报百分比。
@@ -177,15 +177,22 @@ commit/工作区状态、原始日志和结论追加到 `EXPERIMENT_ARCHIVE.md`�
       与 OpenTimer 网表对不上。因此 P1-1 的 Tier-1 采用 **DREAMPlace proxy
       (`gp_hpwl`)**，与 Tier-2 post-GRT 时序配对（与 PPAPlace 的 HPWL-vs-PPA 口径一致）。
       superblue 系列上 timer 可用，但那些设计没有 OpenROAD Tier-2 flow。
+- [x] **扩宽采样跨度（2026-11-17）**：pilot 里 `gp_hpwl` 跨度仅 1.6% 而 Tier-2 标签
+      跨度 ~41%，ρ 被衰减压向 0。新增 `EXPLACE_DUMP_EVAL_DEF`（每次周期评估存 DEF +
+      `manifest.csv`）与 `script/tier2/batch_stratified.sh`，用早/中/晚 checkpoint 取样。
+- [x] **Tier-2 标签扩字段（2026-11-17）**：`script/tier2/extract_labels.py` 现在一次输出
+      rWL（DEF NETS 段求和）、congestion hotspots、DRT violations、Power，
+      已用 bp_fe seed 23 的报告交叉验证（-97.49/-0.36、-143.57/-0.41、15 violations）。
 - [ ] 需要 20–30 个分层 placement（best/median/worst）的 Tier-2 标签后，才能做
       P1-1 的 ρ 计算（分电路 + Fisher z）。**任何 flow 改动都必须写进 experiment record**。
 
 ## P2: PPA surrogate 方向
 
-- [ ] 收集 placement、proxy costs、GP-HPWL、TNS、WNS 的统一数据集。
-- [ ] 先训练 post-placement surrogate，用于 checkpoint ranking，不直接改变 PPO reward。
-- [ ] 验证 surrogate 排名与真实 DREAMPlace/OpenTimer 的相关性。
-- [ ] 再考虑加入 Post-GRT 标签和 PPAPlace 风格 dual-stream predictor。
+- [ ] 先用 **post-GRT 标签**建数据集：placement → (gp_hpwl, rWL, hotspots, DRC, TNS/WNS, Power)。
+      **不要**再计划 post-placement surrogate —— or_cases 上 OpenTimer 不可用（见 P1-1 节）。
+- [ ] n ≥ 30 之前只做**廉价可预测性检验**：handcrafted 特征（gp_hpwl、macro bbox、密度）
+      + 线性/秩回归，看标签能否被预测；不达标就不上 GAT+CNN。
+- [ ] 廉价检验通过后，再考虑 PPAPlace 式 dual-stream predictor（GAT+CNN）。
 - [ ] 仅在 surrogate 稳定后，将其用于 adaptive weight 或 terminal reward。
 
 ## 暂不做

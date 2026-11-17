@@ -239,7 +239,43 @@ class ProblemInstance():
             tns, wns = 0, 0
         # tns, wns = 0, 0
        
+        self._dump_eval_placement(gp_hpwl)
         return gp_hpwl, tns, wns
+
+    def _dump_eval_placement(self, gp_hpwl):
+        """Save every evaluation's placement as a DEF, for stratified sampling.
+
+        Experiment hook, enabled by ``EXPLACE_DUMP_EVAL_DEF=<dir>``.
+
+        P1-1 needs placements spanning a wide quality range. The training loop
+        only keeps the best checkpoint, which samples a narrow band of that
+        distribution and attenuates any correlation with post-GRT timing.
+        Dumping every periodic evaluation (early ones are genuinely worse) gives
+        the spread for free.
+
+        Writes ``eval_<index>.def`` plus a ``manifest.csv`` row
+        ``index,valid,gp_hpwl,failure_reason`` so each DEF can be paired with its
+        own Tier-1 value.
+        """
+        dump_dir = os.environ.get('EXPLACE_DUMP_EVAL_DEF')
+        if not dump_dir:
+            return
+        try:
+            os.makedirs(dump_dir, exist_ok=True)
+            index = getattr(self, '_eval_def_index', 0)
+            self._eval_def_index = index + 1
+            self.save_placement(os.path.join(dump_dir, f'eval_{index:03d}.def'))
+            manifest = os.path.join(dump_dir, 'manifest.csv')
+            write_header = not os.path.exists(manifest)
+            with open(manifest, 'a') as handle:
+                if write_header:
+                    handle.write('index,valid,gp_hpwl,failure_reason\n')
+                handle.write(
+                    f'{index},{int(self.last_evaluation_valid)},{gp_hpwl},'
+                    f'{self.last_evaluation_failure}\n'
+                )
+        except Exception as error:  # never let diagnostics break training
+            print(f'[dump_eval_def] failed: {error}')
 
     def _dump_pre_timing_position(self):
         """Dump the exact position array fed to the timing operator.
