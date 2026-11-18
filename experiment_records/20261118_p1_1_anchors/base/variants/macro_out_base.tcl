@@ -1,0 +1,11 @@
+place_macro -macro_name {bp_fe_pc_gen_1/genblk1_branch_prediction_1/btb_1/btb_mem/macro_mem/mem} -location {539.220 13.860} -orientation MX
+place_macro -macro_name {icache_1/data_mem_banks_0__data_mem_bank/macro_mem/mem} -location {13.490 315.770} -orientation MX
+place_macro -macro_name {icache_1/data_mem_banks_1__data_mem_bank/macro_mem/mem} -location {180.690 468.150} -orientation R0
+place_macro -macro_name {icache_1/data_mem_banks_2__data_mem_bank/macro_mem/mem} -location {180.690 13.860} -orientation MX
+place_macro -macro_name {icache_1/data_mem_banks_3__data_mem_bank/macro_mem/mem} -location {347.700 13.860} -orientation MX
+place_macro -macro_name {icache_1/data_mem_banks_4__data_mem_bank/macro_mem/mem} -location {347.700 468.150} -orientation R0
+place_macro -macro_name {icache_1/data_mem_banks_5__data_mem_bank/macro_mem/mem} -location {13.490 191.890} -orientation MX
+place_macro -macro_name {icache_1/data_mem_banks_6__data_mem_bank/macro_mem/mem} -location {13.490 68.010} -orientation R0
+place_macro -macro_name {icache_1/data_mem_banks_7__data_mem_bank/macro_mem/mem} -location {13.490 439.650} -orientation R0
+place_macro -macro_name {icache_1/metadata_mem.macro_mem.mem} -location {13.490 13.860} -orientation MX
+place_macro -macro_name {icache_1/tag_mem.macro_mem.mem} -location {706.230 13.860} -orientation MX

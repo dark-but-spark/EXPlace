@@ -1,0 +1,6 @@
+anchor,tcl,n_macros
+base,macro_out_base.tcl,11
+jitter5,macro_out_j5.tcl,11
+jitter20,macro_out_j20.tcl,11
+jitter50,macro_out_j50.tcl,11
+shuffle,macro_out_shuffle.tcl,11

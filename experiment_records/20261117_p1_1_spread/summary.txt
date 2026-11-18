@@ -1,0 +1,12 @@
+samples: 24
+gp_hpwl span: 10817404 .. 21662420 (100.3%)
+spearman(gp_hpwl, tier2_grt_tns) = -0.336
+spearman(gp_hpwl, tier2_grt_wns) = -0.311
+spearman(gp_hpwl, rwl_um) = -0.046
+spearman(gp_hpwl, drc_violations) = -0.024
+spearman(gp_hpwl, hotspots) = +nan
+  group halo=0 cab=0 n=6: spearman(gp_hpwl, grt_tns) = -1.000
+  group halo=0 cab=2 n=6: spearman(gp_hpwl, grt_tns) = -0.257
+  group halo=2 cab=0 n=6: spearman(gp_hpwl, grt_tns) = -0.543
+  group halo=2 cab=2 n=6: spearman(gp_hpwl, grt_tns) = -0.486
+reminder: report per-circuit rho; aggregate across circuits with Fisher z
