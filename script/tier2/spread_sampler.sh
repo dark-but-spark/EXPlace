@@ -32,7 +32,7 @@ SEEDS=${SEEDS:-"3 7"}
 LENGTHS=${LENGTHS:-"20 150 600"}
 CONFIGS=${CONFIGS:-"halo0_cab0 halo2_cab0 halo0_cab2 halo2_cab2"}
 
-OUT=$PROJECT/experiment_records/20261117_p1_1_spread
+OUT=${OUT:-$PROJECT/experiment_records/20261117_p1_1_spread}
 mkdir -p "$OUT"
 CSV=$OUT/labels.csv
 LOG=$OUT/run.log
@@ -67,11 +67,15 @@ make_cfg() {  # name halo cab episodes
 train_one() {  # config_name halo cab episodes seed gpu
   local name=$1 halo=$2 cab=$3 ep=$4 seed=$5 gpu=$6
   local run=$PROJECT/long_runs/spread_${name}_e${ep}_s${seed}
+  # Config files must be unique per run: parallel jobs sharing one filename let a
+  # later job's episode count leak into an earlier job (halo0_cab0 trained three
+  # times with the same length).
+  local cfgname=${name}_e${ep}_s${seed}
   rm -rf "$run"; mkdir -p "$run"
-  make_cfg "$name" "$halo" "$cab" "$ep"
+  make_cfg "$cfgname" "$halo" "$cab" "$ep"
   EXPLACE_DUMP_EVAL_DEF="$run/eval_defs" MPLCONFIGDIR=/tmp PYTHONUNBUFFERED=1 \
     /usr/bin/python3 -m src.main \
-      --benchmark "$DESIGN" --config "$name" --seed "$seed" \
+      --benchmark "$DESIGN" --config "$cfgname" --seed "$seed" \
       --log-dir "$run/output" \
       --no-compact-transition --no-worker-rollout --no-mask-cache \
       --no-vectorized-occupancy --no-batch-device-copy --no-mixed-precision \
@@ -85,6 +89,10 @@ say "start $(date -u +%Y-%m-%dT%H:%M:%SZ) design=$DESIGN configs='$CONFIGS' leng
 
 # ---------------- Phase 0: legality probe per config ----------------
 VALID=()
+if [ "${SKIP_PROBE:-0}" = "1" ]; then
+  VALID=($CONFIGS)
+  say "skipping legality probe (SKIP_PROBE=1), using: ${VALID[*]}"
+else
 i=0
 for cfg in $CONFIGS; do
   set -- $(parse_cfg "$cfg")
@@ -105,6 +113,7 @@ for cfg in $CONFIGS; do
   [ "${ok:-0}" -ge 1 ] && VALID+=("$cfg")
   i=$((i+1))
 done
+fi
 [ ${#VALID[@]} -eq 0 ] && { say "no config passed legality; aborting"; exit 1; }
 say "valid configs: ${VALID[*]}"
 
@@ -115,6 +124,14 @@ for cfg in "${VALID[@]}"; do
   set -- $(parse_cfg "$cfg"); halo=$1; cab=$2
   for ep in $LENGTHS; do
     for seed in $SEEDS; do
+      if grep -q "^${DESIGN},${seed},${halo},${cab},${ep}," "$CSV"; then
+        say "train ${cfg} e${ep} s${seed}: already labelled, skipping"
+        continue
+      fi
+      if [ -f "$PROJECT/long_runs/spread_${cfg}_e${ep}_s${seed}/eval_defs/manifest.csv" ]; then
+        say "train ${cfg} e${ep} s${seed}: run dir exists, reusing its dumps"
+        continue
+      fi
       gpu=$(echo "$GPUS" | cut -d' ' -f$((idx % NPROC + 1)))
       train_one "$cfg" "$halo" "$cab" "$ep" "$seed" "$gpu" &
       idx=$((idx+1))
